@@ -1,10 +1,6 @@
 import mongoose from "mongoose";
+import { COMMENT_TYPES } from "../utils/constants";
 
-const COMMENT_TYPES = {
-    TEXT: "text",
-    IMAGE: "image",
-    FILE: "file",
-};
 
 const commentSchema = new mongoose.Schema(
     {

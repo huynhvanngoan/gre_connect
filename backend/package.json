@@ -1,23 +1,44 @@
 {
-  "name": "backend",
+  "name": "education-system-backend",
   "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "dev": "node --watch src/server.js",
-    "start": "node src/server.js"
-  },
-  "keywords": [],
+  "description": "Education System Backend API",
+  "main": "src/server.js",
   "type": "module",
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "dev:nodemon": "nodemon src/server.js"
+  },
+  "keywords": [
+    "education",
+    "api",
+    "nodejs",
+    "express",
+    "mongodb"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
   "dependencies": {
-    "@arcjet/inspect": "1.0.0-beta.8",
-    "@arcjet/node": "1.0.0-beta.8",
-    "@clerk/express": "1.7.0",
-    "cors": "2.8.5",
-    "dotenv": "16.5.0",
-    "express": "5.1.0",
-    "mongoose": "8.16.0"
+    "@clerk/clerk-sdk-node": "^4.13.1",
+    "@clerk/express": "^1.7.42",
+    "bcryptjs": "^2.4.3",
+    "cloudinary": "^2.8.0",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-async-handler": "1.2.0",
+    "express-validator": "^7.3.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.0.0",
+    "morgan": "^1.10.0",
+    "multer": "^2.0.2",
+    "nodemailer": "^6.9.7",
+    "socket.io": "^4.6.2",
+    "streamifier": "^0.1.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
   }
 }

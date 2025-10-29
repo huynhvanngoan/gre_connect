@@ -1,34 +1,10 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
+import { PERMISSIONS, ROLES } from "../utils/constants.js";
 
-// Enum cho các role
-const ROLES = {
-    STUDENT: "student",
-    TEACHER: "teacher", 
-    STAFF: "staff"
-};
 
-// Enum cho permissions
-const PERMISSIONS = {
-    // Post permissions
-    CREATE_ANNOUNCEMENT: "create_announcement",
-    CREATE_HOMEWORK: "create_homework",
-    DELETE_ANY_POST: "delete_any_post",
-    PIN_POST: "pin_post",
-    
-    // User permissions
-    MANAGE_USERS: "manage_users",
-    VIEW_ALL_USERS: "view_all_users",
-    ASSIGN_ROLES: "assign_roles",
-    
-    // Class permissions
-    MANAGE_CLASSES: "manage_classes",
-    VIEW_ALL_CLASSES: "view_all_classes",
-    
-    // Grade permissions
-    GRADE_HOMEWORK: "grade_homework",
-    VIEW_GRADES: "view_grades",
-};
+
+
 
 const userSchema = new mongoose.Schema(
     {
@@ -263,11 +239,11 @@ const userSchema = new mongoose.Schema(
 
 // Indexes
 userSchema.index({ role: 1, isActive: 1 });
-userSchema.index({ email: 1 });
-userSchema.index({ username: 1 });
+// userSchema.index({ email: 1 });
+// userSchema.index({ username: 1 });
 userSchema.index({ "roleSpecificData.classId": 1 });
-userSchema.index({ "roleSpecificData.studentId": 1 });
-userSchema.index({ "roleSpecificData.teacherId": 1 });
+// userSchema.index({ "roleSpecificData.studentId": 1 });
+// userSchema.index({ "roleSpecificData.teacherId": 1 });
 
 // Virtual fields
 userSchema.virtual('fullName').get(function() {

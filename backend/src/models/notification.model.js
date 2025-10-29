@@ -1,60 +1,6 @@
 import mongoose from "mongoose";
+import { NOTIFICATION_PRIORITIES, NOTIFICATION_TYPES } from "../utils/constants";
 
-
-const NOTIFICATION_TYPES = {
-  // Post interactions
-  POST_LIKE: "post_like",
-  POST_COMMENT: "post_comment",
-  POST_SHARE: "post_share",
-  POST_MENTION: "post_mention",
-  
-  // Comment interactions
-  COMMENT_LIKE: "comment_like",
-  COMMENT_REPLY: "comment_reply",
-  COMMENT_MENTION: "comment_mention",
-  
-  // Social
-  NEW_FOLLOWER: "new_follower",
-  FOLLOW_REQUEST: "follow_request",
-  
-  // Homework
-  HOMEWORK_ASSIGNED: "homework_assigned",
-  HOMEWORK_DUE_SOON: "homework_due_soon",
-  HOMEWORK_GRADED: "homework_graded",
-  HOMEWORK_SUBMITTED: "homework_submitted",
-  
-  // Announcement
-  NEW_ANNOUNCEMENT: "new_announcement",
-  ANNOUNCEMENT_UPDATED: "announcement_updated",
-  ANNOUNCEMENT_EXPIRING: "announcement_expiring",
-  
-  // Event
-  EVENT_INVITATION: "event_invitation",
-  EVENT_REMINDER: "event_reminder",
-  EVENT_UPDATED: "event_updated",
-  EVENT_CANCELLED: "event_cancelled",
-  
-  // Poll
-  POLL_CREATED: "poll_created",
-  POLL_ENDING_SOON: "poll_ending_soon",
-  POLL_RESULTS: "poll_results",
-  
-  // System
-  WELCOME: "welcome",
-  ACCOUNT_WARNING: "account_warning",
-  SYSTEM_UPDATE: "system_update",
-  BADGE_EARNED: "badge_earned",
-  
-  // Messages (if you add messaging feature)
-  NEW_MESSAGE: "new_message",
-};
-
-const NOTIFICATION_PRIORITIES = {
-  LOW: "low",
-  MEDIUM: "medium",
-  HIGH: "high",
-  URGENT: "urgent",
-};
 
 const notificationSchema = new mongoose.Schema(
   {

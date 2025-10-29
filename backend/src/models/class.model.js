@@ -1,21 +1,11 @@
 import mongoose from "mongoose";
+import { CLASS_STATUS, SEMESTER } from "../utils/constants.js";
 
 // ============================================
 // CLASS SCHEMA  
 // ============================================
 
-const CLASS_STATUS = {
-  ACTIVE: "active",
-  INACTIVE: "inactive",
-  ARCHIVED: "archived",
-  UPCOMING: "upcoming",
-};
 
-const SEMESTER = {
-  FALL: "fall",
-  SPRING: "spring",
-  SUMMER: "summer",
-};
 
 const classSchema = new mongoose.Schema(
   {
@@ -227,12 +217,12 @@ const classSchema = new mongoose.Schema(
 );
 
 // Indexes
-classSchema.index({ code: 1 });
+// classSchema.index({ code: 1 });
 classSchema.index({ mainTeacher: 1 });
 classSchema.index({ "students.student": 1 });
 classSchema.index({ academicYear: 1, semester: 1 });
 classSchema.index({ status: 1 });
-classSchema.index({ joinCode: 1 });
+// classSchema.index({ joinCode: 1 });
 
 // Virtuals
 classSchema.virtual('studentCount').get(function() {

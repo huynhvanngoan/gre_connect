@@ -1,28 +1,7 @@
 import mongoose from "mongoose";
+import { POST_STATUS, POST_TYPES, VISIBILITY_TYPES } from "../utils/constants.js";
 
 // Enum cho post types
-const POST_TYPES = {
-  ANNOUNCEMENT: "announcement",
-  HOMEWORK: "homework",
-  DISCUSSION: "discussion",
-  GENERAL: "general",
-  POLL: "poll",
-  EVENT: "event",
-};
-
-const VISIBILITY_TYPES = {
-  PUBLIC: "public",
-  TEACHERS_ONLY: "teachers_only",
-  STUDENTS_ONLY: "students_only",
-  CLASS_SPECIFIC: "class_specific",
-  FOLLOWERS_ONLY: "followers_only",
-};
-
-const POST_STATUS = {
-  DRAFT: "draft",
-  PUBLISHED: "published",
-  ARCHIVED: "archived",
-};
 
 const postSchema = new mongoose.Schema(
   {

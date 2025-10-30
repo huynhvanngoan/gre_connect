@@ -11,64 +11,107 @@ import routes from "./routes/index.js";
 import { connectDB } from "./config/db.js";
 import { initSocket } from "./config/socket.js";
 import { errorMiddleware } from "./middlewares/error.middleware.js";
-import { clerkMiddleware } from "@clerk/express"
+import { clerkMiddleware } from "@clerk/express";
 import { ENV } from "./config/env.js";
 
 dotenv.config();
 
-/* -------------------------------------------------------------
- *  Core Server Initialization
- * ----------------------------------------------------------- */
-async function bootstrap() {
+// ============================================
+// CREATE EXPRESS APP
+// ============================================
+
+const app = express();
+
+// 🧰 Middlewares cơ bản
+app.use(helmet());
+app.use(cors({
+  origin: ENV.CLIENT_URL || "*",
+  credentials: true,
+}));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(clerkMiddleware());
+app.use(morgan(ENV.NODE_ENV === "production" ? "combined" : "dev"));
+app.use(cookieParser());
+
+// 🚏 API Routes
+app.use("/api/v1", routes);
+
+// Root endpoint
+app.get("/", (req, res) => {
+  res.json({
+    success: true,
+    message: "Education Social Platform API",
+    version: "1.0.0",
+    endpoints: {
+      health: "/api/v1/health",
+      docs: "/api/v1/docs",
+    },
+  });
+});
+
+// ⚙️ Error & 404 Handling
+app.use(errorMiddleware);
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "Route not found",
+    path: req.path,
+  });
+});
+
+// ============================================
+// SERVER INITIALIZATION (for non-serverless)
+// ============================================
+
+const startServer = async () => {
   try {
-    // 🧩 1. Kết nối Database
+    // 🧩 Kết nối Database
     await connectDB();
     console.log("✅ Database connected successfully");
 
-    // 🧱 2. Tạo Express app
-    const app = express();
-
-    // 🧰 3. Middlewares cơ bản
-    app.use(helmet());
-    app.use(cors());
-    app.use(express.json());
-    app.use(clerkMiddleware())
-    app.use(morgan(ENV.NODE_ENV === "production" ? "combined" : "development"));
-    app.use(cookieParser());
-
-    // 🚏 4. API Routes
-    app.use("/api/v1", routes);
-
-    // ⚙️ 5. Error & 404 Handling
-    app.use(errorMiddleware);
-    app.use((req, res) => {
-      res.status(404).json({
-        success: false,
-        message: "Route not found",
-      });
-    });
-
-    // 🔌 6. HTTP + Socket.IO Server
+    // 🔌 HTTP + Socket.IO Server
     const server = http.createServer(app);
     initSocket(server);
 
-    // 🚀 7. Start Server
+    // 🚀 Start Server
     const PORT = ENV.PORT || 5000;
     server.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📡 Environment: ${ENV.NODE_ENV || "development"}`);
+      console.log(`🌐 API Base URL: http://localhost:${PORT}/api/v1`);
     });
 
-    // ⚠️ 8. Handle unhandled rejections
+    // ⚠️ Handle unhandled rejections
     process.on("unhandledRejection", (err) => {
       console.error(`❌ Unhandled Rejection: ${err.message}`);
       server.close(() => process.exit(1));
     });
+
+    // Handle SIGTERM
+    process.on("SIGTERM", () => {
+      console.log("👋 SIGTERM received, shutting down gracefully");
+      server.close(() => {
+        console.log("✅ Process terminated");
+      });
+    });
+
+    return server;
   } catch (err) {
     console.error("❌ Failed to start server:", err.message);
     process.exit(1);
   }
-}
+};
 
-// 🏁 Run app
-bootstrap();
+// ============================================
+// EXPORTS
+// ============================================
+
+// Export app cho Vercel/serverless platforms
+export default app;
+
+// Start server nếu không phải serverless environment
+// Vercel sẽ không chạy phần này vì nó import app trực tiếp
+if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
+  startServer();
+}

@@ -1,6 +1,5 @@
 import mongoose from "mongoose";
-import { COMMENT_TYPES } from "../utils/constants";
-
+import { COMMENT_TYPES } from "../utils/constants.js";
 
 const commentSchema = new mongoose.Schema(
     {
@@ -41,7 +40,7 @@ const commentSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: "Comment",
         }],
-        // Mentions trong comment
+        // Mentions
         mentions: [{
             type: mongoose.Schema.Types.ObjectId,
             ref: "User",
@@ -63,7 +62,7 @@ const commentSchema = new mongoose.Schema(
                 default: Date.now,
             },
         }],
-        // Report system
+        // Reports
         reports: [{
             reportedBy: {
                 type: mongoose.Schema.Types.ObjectId,
@@ -168,11 +167,11 @@ commentSchema.methods.hide = async function (reason) {
     return await this.save();
 };
 
-// Static methods
+// Statics
 commentSchema.statics.findByPost = function (postId, options = {}) {
     return this.find({
         post: postId,
-        parentComment: null, // Only top-level comments
+        parentComment: null,
         isActive: true,
         isHidden: false,
         ...options
@@ -205,7 +204,7 @@ commentSchema.statics.findReplies = function (commentId) {
         .sort({ createdAt: 1 });
 };
 
-// Middleware: Update post's comments array
+// Hooks
 commentSchema.post("save", async function () {
     if (this.isNew && !this.parentComment) {
         await mongoose.model("Post").findByIdAndUpdate(
@@ -215,7 +214,6 @@ commentSchema.post("save", async function () {
     }
 });
 
-// Middleware: Remove from post when deleted
 commentSchema.post("remove", async function () {
     if (!this.parentComment) {
         await mongoose.model("Post").findByIdAndUpdate(
@@ -227,3 +225,5 @@ commentSchema.post("remove", async function () {
 
 const Comment = mongoose.model("Comment", commentSchema);
 export { Comment, COMMENT_TYPES };
+
+

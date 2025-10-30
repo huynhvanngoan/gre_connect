@@ -13,4 +13,8 @@ export const ENV = {
     CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET,
     ARCJET_KEY: process.env.ARCJET_KEY,
     ABLY_API_KEY: process.env.ABLY_API_KEY,
+    JWT_SECRET: process.env.JWT_SECRET,
+    JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET,
+    JWT_REFRESH_EXPIRE: process.env.JWT_REFRESH_EXPIRE,
+    CLIENT_URL: process.env.CLIENT_URL
 };

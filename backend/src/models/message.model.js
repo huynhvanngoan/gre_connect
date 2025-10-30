@@ -1,470 +1,153 @@
 import mongoose from "mongoose";
-import { CONVERSATION_TYPES } from "../utils/constants";
-
-// ============================================
-// CONVERSATION SCHEMA
-// ============================================
-
-
-const conversationSchema = new mongoose.Schema(
-  {
-    type: {
-      type: String,
-      enum: Object.values(CONVERSATION_TYPES),
-      required: true,
-    },
-    name: {
-      type: String,
-      trim: true,
-    },
-    description: {
-      type: String,
-      maxLength: 500,
-    },
-    avatar: {
-      type: String,
-      default: "",
-    },
-    // Participants
-    participants: [{
-      user: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-        required: true,
-      },
-      role: {
-        type: String,
-        enum: ["admin", "moderator", "member"],
-        default: "member",
-      },
-      joinedAt: {
-        type: Date,
-        default: Date.now,
-      },
-      lastReadAt: {
-        type: Date,
-        default: Date.now,
-      },
-      notificationsMuted: {
-        type: Boolean,
-        default: false,
-      },
-      isPinned: {
-        type: Boolean,
-        default: false,
-      },
-    }],
-    // For class conversations
-    classId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Class",
-    },
-    // Last message info for quick access
-    lastMessage: {
-      content: String,
-      sender: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-      },
-      sentAt: Date,
-      type: String,
-    },
-    // Settings
-    settings: {
-      allowFileSharing: {
-        type: Boolean,
-        default: true,
-      },
-      allowVoiceMessages: {
-        type: Boolean,
-        default: true,
-      },
-      allowVideoMessages: {
-        type: Boolean,
-        default: true,
-      },
-      allowCalls: {
-        type: Boolean,
-        default: true,
-      },
-      maxFileSize: {
-        type: Number,
-        default: 10485760, // 10MB
-      },
-      onlyAdminsCanPost: {
-        type: Boolean,
-        default: false,
-      },
-    },
-    // Status
-    isActive: {
-      type: Boolean,
-      default: true,
-    },
-    isArchived: {
-      type: Boolean,
-      default: false,
-    },
-  },
-  { 
-    timestamps: true,
-  }
-);
-
-// Indexes
-conversationSchema.index({ "participants.user": 1 });
-conversationSchema.index({ type: 1 });
-conversationSchema.index({ classId: 1 });
-conversationSchema.index({ updatedAt: -1 });
-
-// Virtuals
-conversationSchema.virtual('participantCount').get(function() {
-  return this.participants.length;
-});
-
-conversationSchema.virtual('isDirect').get(function() {
-  return this.type === CONVERSATION_TYPES.DIRECT;
-});
-
-conversationSchema.virtual('isGroup').get(function() {
-  return this.type === CONVERSATION_TYPES.GROUP;
-});
-
-conversationSchema.virtual('isClass').get(function() {
-  return this.type === CONVERSATION_TYPES.CLASS;
-});
-
-// Methods
-conversationSchema.methods.addParticipant = async function(userId, role = "member") {
-  const exists = this.participants.some(p => p.user.equals(userId));
-  
-  if (!exists) {
-    this.participants.push({
-      user: userId,
-      role,
-      joinedAt: new Date(),
-    });
-    
-    await this.save();
-    
-    // Create system message
-    await this.createSystemMessage({
-      action: "user_joined",
-      performedBy: userId,
-      affectedUsers: [userId],
-    });
-  }
-  
-  return this;
-};
-
-conversationSchema.methods.removeParticipant = async function(userId, removedBy = null) {
-  this.participants = this.participants.filter(p => !p.user.equals(userId));
-  await this.save();
-  
-  // Create system message
-  await this.createSystemMessage({
-    action: "user_left",
-    performedBy: removedBy || userId,
-    affectedUsers: [userId],
-  });
-  
-  return this;
-};
-
-conversationSchema.methods.updateLastMessage = async function(messageData) {
-  this.lastMessage = {
-    content: messageData.content,
-    sender: messageData.sender,
-    sentAt: messageData.createdAt,
-    type: messageData.type,
-  };
-  
-  return await this.save();
-};
-
-conversationSchema.methods.markAsRead = async function(userId) {
-  const participant = this.participants.find(p => p.user.equals(userId));
-  
-  if (participant) {
-    participant.lastReadAt = new Date();
-    await this.save();
-  }
-  
-  return this;
-};
-
-conversationSchema.methods.getUnreadCount = async function(userId) {
-  const participant = this.participants.find(p => p.user.equals(userId));
-  
-  if (!participant) return 0;
-  
-  const Message = mongoose.model("Message");
-  return await Message.countDocuments({
-    conversation: this._id,
-    createdAt: { $gt: participant.lastReadAt },
-    sender: { $ne: userId },
-    isDeleted: false,
-  });
-};
-
-conversationSchema.methods.togglePin = async function(userId) {
-  const participant = this.participants.find(p => p.user.equals(userId));
-  
-  if (participant) {
-    participant.isPinned = !participant.isPinned;
-    await this.save();
-  }
-  
-  return this;
-};
-
-conversationSchema.methods.toggleMute = async function(userId) {
-  const participant = this.participants.find(p => p.user.equals(userId));
-  
-  if (participant) {
-    participant.notificationsMuted = !participant.notificationsMuted;
-    await this.save();
-  }
-  
-  return this;
-};
-
-conversationSchema.methods.updateParticipantRole = async function(userId, newRole) {
-  const participant = this.participants.find(p => p.user.equals(userId));
-  
-  if (participant) {
-    participant.role = newRole;
-    await this.save();
-  }
-  
-  return this;
-};
-
-conversationSchema.methods.createSystemMessage = async function(systemData) {
-  const Message = mongoose.model("Message");
-  const User = mongoose.model("User");
-  
-  let content = "";
-  const performer = await User.findById(systemData.performedBy);
-  const affected = systemData.affectedUsers.length > 0 
-    ? await User.findById(systemData.affectedUsers[0]) 
-    : null;
-  
-  switch(systemData.action) {
-    case "user_joined":
-      content = `${performer.firstName} joined the conversation`;
-      break;
-    case "user_left":
-      content = affected && !affected._id.equals(performer._id)
-        ? `${performer.firstName} removed ${affected.firstName}`
-        : `${performer.firstName} left the conversation`;
-      break;
-    case "group_created":
-      content = `${performer.firstName} created this group`;
-      break;
-    case "name_changed":
-      content = `${performer.firstName} changed the group name`;
-      break;
-    case "avatar_changed":
-      content = `${performer.firstName} changed the group photo`;
-      break;
-    default:
-      content = "System message";
-  }
-  
-  return await Message.create({
-    conversation: this._id,
-    sender: systemData.performedBy,
-    type: "system",
-    content,
-    systemMessageData: systemData,
-  });
-};
-
-// Static methods
-conversationSchema.statics.findByUser = function(userId) {
-  return this.find({
-    "participants.user": userId,
-    isActive: true,
-    isArchived: false,
-  })
-  .populate("participants.user", "firstName lastName username profilePicture role")
-  .populate("classId", "name code coverImage")
-  .sort({ updatedAt: -1 });
-};
-
-conversationSchema.statics.findDirectConversation = function(user1Id, user2Id) {
-  return this.findOne({
-    type: CONVERSATION_TYPES.DIRECT,
-    "participants.user": { $all: [user1Id, user2Id] },
-    isActive: true,
-  });
-};
-
-conversationSchema.statics.createDirectConversation = async function(user1Id, user2Id) {
-  // Check if conversation already exists
-  let conversation = await this.findDirectConversation(user1Id, user2Id);
-  
-  if (!conversation) {
-    conversation = await this.create({
-      type: CONVERSATION_TYPES.DIRECT,
-      participants: [
-        { user: user1Id },
-        { user: user2Id }
-      ],
-    });
-  }
-  
-  return conversation;
-};
-
-conversationSchema.statics.createGroupConversation = async function(name, creatorId, participantIds, description = "") {
-  const conversation = await this.create({
-    type: CONVERSATION_TYPES.GROUP,
-    name,
-    description,
-    participants: [
-      { user: creatorId, role: "admin" },
-      ...participantIds.map(id => ({ user: id, role: "member" }))
-    ],
-  });
-  
-  // Create system message
-  await conversation.createSystemMessage({
-    action: "group_created",
-    performedBy: creatorId,
-    affectedUsers: [],
-  });
-  
-  return conversation;
-};
-
-conversationSchema.statics.createClassConversation = async function(classData) {
-  return await this.create({
-    type: CONVERSATION_TYPES.CLASS,
-    name: classData.name,
-    classId: classData._id,
-    avatar: classData.coverImage,
-    participants: classData.participants,
-  });
-};
-
-const Conversation = mongoose.model("Conversation", conversationSchema);
+import { MESSAGE_TYPES, MESSAGE_STATUS } from "../utils/constants.js";
 
 // ============================================
 // MESSAGE SCHEMA
 // ============================================
 
-const MESSAGE_TYPES = {
-  TEXT: "text",
-  IMAGE: "image",
-  FILE: "file",
-  VOICE: "voice",
-  VIDEO: "video",
-  SYSTEM: "system",
-  CALL: "call",
-};
-
 const messageSchema = new mongoose.Schema(
   {
+    // Conversation reference
     conversation: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Conversation",
       required: true,
+      index: true,
     },
+    
+    // Sender
     sender: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true,
     },
+    
+    // Message type
     type: {
       type: String,
       enum: Object.values(MESSAGE_TYPES),
       default: MESSAGE_TYPES.TEXT,
-    },
-    content: {
-      type: String,
       required: true,
     },
-    // For media messages
-    media: {
-      url: String,
-      thumbnailUrl: String,
-      fileName: String,
-      fileSize: Number,
-      fileType: String,
-      duration: Number, // For voice/video in seconds
-      width: Number,
-      height: Number,
+    
+    // Content
+    content: {
+      type: String,
+      maxLength: 5000,
     },
-    // For call messages
-    callData: {
-      callId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Call",
-      },
-      callType: {
+    
+    // Media attachments
+    media: [{
+      type: {
         type: String,
-        enum: ["audio", "video"],
+        enum: ["image", "video", "audio", "file"],
       },
-      duration: Number,
-      status: {
+      url: {
         type: String,
-        enum: ["missed", "declined", "completed", "cancelled"],
+        required: true,
       },
+      publicId: String, // Cloudinary public ID
+      filename: String,
+      size: Number, // File size in bytes
+      mimeType: String,
+      duration: Number, // For audio/video in seconds
+      thumbnail: String, // Thumbnail URL for videos
+      width: Number, // For images/videos
+      height: Number, // For images/videos
+    }],
+    
+    // Location data (for location messages)
+    location: {
+      latitude: {
+        type: Number,
+        min: -90,
+        max: 90,
+      },
+      longitude: {
+        type: Number,
+        min: -180,
+        max: 180,
+      },
+      address: String,
+      name: String, // Place name
     },
+    
     // Reply to another message
     replyTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Message",
     },
-    // Forwarded message
+    
+    // Forwarded from
     forwardedFrom: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Message",
     },
+    
     // Mentions
     mentions: [{
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     }],
+    
     // Reactions
     reactions: [{
       user: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
+        required: true,
       },
-      emoji: String,
+      emoji: {
+        type: String,
+        required: true,
+      },
       createdAt: {
         type: Date,
         default: Date.now,
       },
     }],
+    
     // Read receipts
     readBy: [{
       user: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
+        required: true,
       },
       readAt: {
         type: Date,
         default: Date.now,
       },
     }],
+    
+    // Delivery status
+    status: {
+      type: String,
+      enum: Object.values(MESSAGE_STATUS),
+      default: MESSAGE_STATUS.SENT,
+    },
+    
     // Edit history
     isEdited: {
       type: Boolean,
       default: false,
     },
     editHistory: [{
-      previousContent: String,
+      previousContent: {
+        type: String,
+        required: true,
+      },
       editedAt: {
         type: Date,
         default: Date.now,
       },
     }],
-    // Status
+    editedAt: {
+      type: Date,
+    },
+    
+    // Deletion
     isDeleted: {
       type: Boolean,
       default: false,
@@ -476,17 +159,44 @@ const messageSchema = new mongoose.Schema(
     deletedAt: {
       type: Date,
     },
-    // System messages
-    systemMessageData: {
-      action: String, // e.g., "user_joined", "user_left", "group_created"
-      performedBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-      },
-      affectedUsers: [{
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-      }],
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    
+    // System message data
+    systemType: {
+      type: String,
+      enum: [
+        "user_joined",
+        "user_left",
+        "user_added",
+        "user_removed",
+        "user_promoted",
+        "user_demoted",
+        "group_created",
+        "name_changed",
+        "avatar_changed",
+        "settings_changed",
+        "call_started",
+        "call_ended",
+        "call_missed",
+      ],
+    },
+    systemMetadata: {
+      type: mongoose.Schema.Types.Mixed,
+    },
+    
+    // Metadata
+    metadata: {
+      clientMessageId: String, // For client-side message tracking
+      deviceType: String, // mobile, web, desktop
+      userAgent: String,
+    },
+    
+    // Expiry (for disappearing messages - future feature)
+    expiresAt: {
+      type: Date,
     },
   },
   { 
@@ -494,15 +204,28 @@ const messageSchema = new mongoose.Schema(
   }
 );
 
-// Indexes
+// ============================================
+// INDEXES
+// ============================================
+
+// Compound indexes for efficient queries
 messageSchema.index({ conversation: 1, createdAt: -1 });
+messageSchema.index({ conversation: 1, type: 1, createdAt: -1 });
 messageSchema.index({ sender: 1, createdAt: -1 });
 messageSchema.index({ "readBy.user": 1 });
 messageSchema.index({ mentions: 1 });
+messageSchema.index({ isDeleted: 1, deletedFor: 1 });
+messageSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 }); // TTL index
 
-// Virtuals
+// Text search index
+messageSchema.index({ content: "text" });
+
+// ============================================
+// VIRTUALS
+// ============================================
+
 messageSchema.virtual('isRead').get(function() {
-  return this.readBy.length > 0;
+  return this.readBy && this.readBy.length > 0;
 });
 
 messageSchema.virtual('isSystem').get(function() {
@@ -510,25 +233,53 @@ messageSchema.virtual('isSystem').get(function() {
 });
 
 messageSchema.virtual('hasMedia').get(function() {
-  return [MESSAGE_TYPES.IMAGE, MESSAGE_TYPES.VIDEO, MESSAGE_TYPES.FILE, MESSAGE_TYPES.VOICE].includes(this.type);
+  return this.media && this.media.length > 0;
 });
 
-// Methods
+messageSchema.virtual('hasLocation').get(function() {
+  return this.type === MESSAGE_TYPES.LOCATION && this.location;
+});
+
+messageSchema.virtual('isForwarded').get(function() {
+  return !!this.forwardedFrom;
+});
+
+messageSchema.virtual('reactionCount').get(function() {
+  return this.reactions ? this.reactions.length : 0;
+});
+
+// ============================================
+// METHODS
+// ============================================
+
+/**
+ * Mark message as read by user
+ */
 messageSchema.methods.markAsRead = async function(userId) {
+  // Don't mark own messages as read
+  if (this.sender.equals(userId)) {
+    return this;
+  }
+  
+  // Check if already read
   const alreadyRead = this.readBy.some(r => r.user.equals(userId));
   
-  if (!alreadyRead && !this.sender.equals(userId)) {
+  if (!alreadyRead) {
     this.readBy.push({
       user: userId,
       readAt: new Date(),
     });
     
+    this.status = MESSAGE_STATUS.READ;
     await this.save();
   }
   
   return this;
 };
 
+/**
+ * Add or update reaction
+ */
 messageSchema.methods.addReaction = async function(userId, emoji) {
   // Remove existing reaction from this user
   this.reactions = this.reactions.filter(r => !r.user.equals(userId));
@@ -537,58 +288,156 @@ messageSchema.methods.addReaction = async function(userId, emoji) {
   this.reactions.push({
     user: userId,
     emoji,
+    createdAt: new Date(),
   });
   
   return await this.save();
 };
 
+/**
+ * Remove reaction
+ */
 messageSchema.methods.removeReaction = async function(userId) {
   this.reactions = this.reactions.filter(r => !r.user.equals(userId));
   return await this.save();
 };
 
-messageSchema.methods.editContent = async function(newContent) {
+/**
+ * Get reactions grouped by emoji
+ */
+messageSchema.methods.getReactionsSummary = function() {
+  const summary = {};
+  
+  this.reactions.forEach(reaction => {
+    if (!summary[reaction.emoji]) {
+      summary[reaction.emoji] = {
+        emoji: reaction.emoji,
+        count: 0,
+        users: [],
+      };
+    }
+    
+    summary[reaction.emoji].count++;
+    summary[reaction.emoji].users.push(reaction.user);
+  });
+  
+  return Object.values(summary);
+};
+
+/**
+ * Edit message content
+ */
+messageSchema.methods.editContent = async function(newContent, userId) {
+  // Only text messages can be edited
   if (this.type !== MESSAGE_TYPES.TEXT) {
-    throw new Error("Can only edit text messages");
+    throw new Error("Only text messages can be edited");
   }
   
+  // Only sender can edit
+  if (!this.sender.equals(userId)) {
+    throw new Error("Only the sender can edit this message");
+  }
+  
+  // Can't edit deleted messages
+  if (this.isDeleted) {
+    throw new Error("Cannot edit deleted messages");
+  }
+  
+  // Save to edit history
   this.editHistory.push({
     previousContent: this.content,
+    editedAt: new Date(),
   });
   
   this.content = newContent;
   this.isEdited = true;
+  this.editedAt = new Date();
   
   return await this.save();
 };
 
-messageSchema.methods.deleteForEveryone = async function() {
+/**
+ * Delete message for everyone
+ */
+messageSchema.methods.deleteForEveryone = async function(userId) {
+  // Only sender can delete for everyone
+  if (!this.sender.equals(userId)) {
+    throw new Error("Only the sender can delete this message for everyone");
+  }
+  
   this.isDeleted = true;
   this.deletedAt = new Date();
+  this.deletedBy = userId;
+  this.content = "This message was deleted";
+  
   return await this.save();
 };
 
+/**
+ * Delete message for specific user
+ */
 messageSchema.methods.deleteForUser = async function(userId) {
   if (!this.deletedFor.includes(userId)) {
     this.deletedFor.push(userId);
     await this.save();
   }
+  
   return this;
 };
 
+/**
+ * Forward message to another conversation
+ */
 messageSchema.methods.forwardTo = async function(conversationId, forwardedBy) {
-  return await Message.create({
+  const Message = mongoose.model("Message");
+  
+  const forwardedMessage = await Message.create({
     conversation: conversationId,
     sender: forwardedBy,
     type: this.type,
     content: this.content,
     media: this.media,
+    location: this.location,
     forwardedFrom: this._id,
   });
+  
+  return forwardedMessage;
 };
 
-// Static methods
-messageSchema.statics.findByConversation = function(conversationId, userId, limit = 50, before = null) {
+/**
+ * Check if user can see this message
+ */
+messageSchema.methods.canUserSee = function(userId) {
+  // Deleted for everyone
+  if (this.isDeleted) return false;
+  
+  // Deleted for this specific user
+  if (this.deletedFor.includes(userId)) return false;
+  
+  return true;
+};
+
+/**
+ * Check if user has read this message
+ */
+messageSchema.methods.hasUserRead = function(userId) {
+  return this.readBy.some(r => r.user.equals(userId));
+};
+
+// ============================================
+// STATIC METHODS
+// ============================================
+
+/**
+ * Find messages by conversation with pagination
+ */
+messageSchema.statics.findByConversation = function(conversationId, userId, options = {}) {
+  const {
+    limit = 50,
+    before = null,
+    after = null,
+  } = options;
+  
   const query = {
     conversation: conversationId,
     isDeleted: false,
@@ -596,11 +445,15 @@ messageSchema.statics.findByConversation = function(conversationId, userId, limi
   };
   
   if (before) {
-    query.createdAt = { $lt: before };
+    query.createdAt = { $lt: new Date(before) };
+  }
+  
+  if (after) {
+    query.createdAt = { $gt: new Date(after) };
   }
   
   return this.find(query)
-    .populate("sender", "firstName lastName username profilePicture role")
+    .populate("sender", "firstName lastName username profilePicture role isOnline")
     .populate({
       path: "replyTo",
       populate: {
@@ -608,10 +461,15 @@ messageSchema.statics.findByConversation = function(conversationId, userId, limi
         select: "firstName lastName username profilePicture"
       }
     })
+    .populate("mentions", "firstName lastName username")
+    .populate("reactions.user", "firstName lastName username profilePicture")
     .sort({ createdAt: -1 })
     .limit(limit);
 };
 
+/**
+ * Search messages in conversation
+ */
 messageSchema.statics.searchMessages = function(conversationId, searchTerm, userId) {
   const searchRegex = new RegExp(searchTerm, "i");
   
@@ -623,22 +481,30 @@ messageSchema.statics.searchMessages = function(conversationId, searchTerm, user
     deletedFor: { $ne: userId },
   })
   .populate("sender", "firstName lastName username profilePicture")
-  .sort({ createdAt: -1 });
+  .sort({ createdAt: -1 })
+  .limit(50);
 };
 
+/**
+ * Get unread message count
+ */
 messageSchema.statics.getUnreadCount = function(conversationId, userId, lastReadAt) {
   return this.countDocuments({
     conversation: conversationId,
     sender: { $ne: userId },
     createdAt: { $gt: lastReadAt },
     isDeleted: false,
+    deletedFor: { $ne: userId },
   });
 };
 
+/**
+ * Get media messages
+ */
 messageSchema.statics.getMediaMessages = function(conversationId, userId, mediaType = null) {
   const query = {
     conversation: conversationId,
-    type: { $in: [MESSAGE_TYPES.IMAGE, MESSAGE_TYPES.VIDEO, MESSAGE_TYPES.FILE] },
+    type: { $in: [MESSAGE_TYPES.IMAGE, MESSAGE_TYPES.VIDEO, MESSAGE_TYPES.FILE, MESSAGE_TYPES.AUDIO] },
     isDeleted: false,
     deletedFor: { $ne: userId },
   };
@@ -652,13 +518,89 @@ messageSchema.statics.getMediaMessages = function(conversationId, userId, mediaT
     .sort({ createdAt: -1 });
 };
 
-// Middleware: Update conversation's lastMessage
-messageSchema.post("save", async function() {
-  if (this.isNew && !this.isDeleted && this.type !== MESSAGE_TYPES.SYSTEM) {
+/**
+ * Mark multiple messages as read
+ */
+messageSchema.statics.markManyAsRead = async function(messageIds, userId) {
+  return await this.updateMany(
+    {
+      _id: { $in: messageIds },
+      sender: { $ne: userId },
+      "readBy.user": { $ne: userId },
+    },
+    {
+      $push: {
+        readBy: {
+          user: userId,
+          readAt: new Date(),
+        }
+      },
+      $set: {
+        status: MESSAGE_STATUS.READ,
+      }
+    }
+  );
+};
+
+/**
+ * Delete old messages (cleanup)
+ */
+messageSchema.statics.deleteOldMessages = async function(days = 365) {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - days);
+  
+  return await this.deleteMany({
+    createdAt: { $lt: cutoffDate },
+    isDeleted: true,
+  });
+};
+
+/**
+ * Get message statistics for conversation
+ */
+messageSchema.statics.getConversationStats = async function(conversationId) {
+  const stats = await this.aggregate([
+    { $match: { conversation: conversationId, isDeleted: false } },
+    {
+      $group: {
+        _id: null,
+        totalMessages: { $sum: 1 },
+        totalImages: {
+          $sum: { $cond: [{ $eq: ["$type", MESSAGE_TYPES.IMAGE] }, 1, 0] }
+        },
+        totalVideos: {
+          $sum: { $cond: [{ $eq: ["$type", MESSAGE_TYPES.VIDEO] }, 1, 0] }
+        },
+        totalFiles: {
+          $sum: { $cond: [{ $eq: ["$type", MESSAGE_TYPES.FILE] }, 1, 0] }
+        },
+        totalReactions: { $sum: { $size: "$reactions" } },
+      }
+    }
+  ]);
+  
+  return stats[0] || {
+    totalMessages: 0,
+    totalImages: 0,
+    totalVideos: 0,
+    totalFiles: 0,
+    totalReactions: 0,
+  };
+};
+
+// ============================================
+// MIDDLEWARE
+// ============================================
+
+// Update conversation's last message
+messageSchema.post("save", async function(doc) {
+  if (doc.isNew && !doc.isDeleted && doc.type !== MESSAGE_TYPES.SYSTEM) {
     try {
-      const conversation = await Conversation.findById(this.conversation);
+      const Conversation = mongoose.model("Conversation");
+      const conversation = await Conversation.findById(doc.conversation);
+      
       if (conversation) {
-        await conversation.updateLastMessage(this);
+        await conversation.updateLastMessage(doc._id);
       }
     } catch (error) {
       console.error("Error updating last message:", error);
@@ -666,25 +608,34 @@ messageSchema.post("save", async function() {
   }
 });
 
-// Middleware: Create notifications for mentions
-messageSchema.post("save", async function() {
-  if (this.isNew && this.mentions.length > 0) {
+// Create notification for mentions
+messageSchema.post("save", async function(doc) {
+  if (doc.isNew && doc.mentions && doc.mentions.length > 0) {
     try {
       const Notification = mongoose.model("Notification");
-      const sender = await mongoose.model("User").findById(this.sender);
-      const conversation = await Conversation.findById(this.conversation);
+      const User = mongoose.model("User");
+      const Conversation = mongoose.model("Conversation");
       
-      for (const mentionedUserId of this.mentions) {
+      const sender = await User.findById(doc.sender);
+      const conversation = await Conversation.findById(doc.conversation);
+      
+      for (const mentionedUserId of doc.mentions) {
         // Check if user has muted notifications
-        const participant = conversation.participants.find(p => p.user.equals(mentionedUserId));
-        if (participant && !participant.notificationsMuted) {
-          await Notification.createNotification({
-            recipientId: mentionedUserId,
-            senderId: this.sender,
+        const participant = conversation.participants.find(p => 
+          p.user.equals(mentionedUserId)
+        );
+        
+        if (participant && !participant.isMuted) {
+          await Notification.create({
+            recipient: mentionedUserId,
+            sender: doc.sender,
             type: "message_mention",
             title: "You were mentioned",
-            message: `${sender.firstName} ${sender.lastName} mentioned you in a message`,
-            actionUrl: `/messages/${this.conversation}`,
+            message: `${sender.fullName} mentioned you in a message`,
+            data: {
+              conversationId: doc.conversation,
+              messageId: doc._id,
+            },
           });
         }
       }
@@ -694,44 +645,10 @@ messageSchema.post("save", async function() {
   }
 });
 
-// Middleware: Send notification for new messages in unmuted conversations
-messageSchema.post("save", async function() {
-  if (this.isNew && this.type === MESSAGE_TYPES.TEXT && !this.isDeleted) {
-    try {
-      const Notification = mongoose.model("Notification");
-      const conversation = await Conversation.findById(this.conversation);
-      const sender = await mongoose.model("User").findById(this.sender);
-      
-      // Notify all participants except sender
-      for (const participant of conversation.participants) {
-        if (!participant.user.equals(this.sender) && !participant.notificationsMuted) {
-          await Notification.createNotification({
-            recipientId: participant.user,
-            senderId: this.sender,
-            type: "new_message",
-            title: conversation.type === CONVERSATION_TYPES.DIRECT 
-              ? `${sender.firstName} ${sender.lastName}`
-              : conversation.name || "Group Message",
-            message: this.content.substring(0, 100),
-            actionUrl: `/messages/${this.conversation}`,
-          });
-        }
-      }
-    } catch (error) {
-      console.error("Error creating message notifications:", error);
-    }
-  }
-});
-
-const Message = mongoose.model("Message", messageSchema);
-
 // ============================================
 // EXPORTS
 // ============================================
 
-export { 
-  Conversation, 
-  Message, 
-  CONVERSATION_TYPES,
-  MESSAGE_TYPES, 
-};
+const Message = mongoose.model("Message", messageSchema);
+
+export default Message;

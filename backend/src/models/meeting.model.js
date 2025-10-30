@@ -385,7 +385,7 @@ const meetingSchema = new mongoose.Schema(
       },
     }],
   },
-  { 
+  {
     timestamps: true,
   }
 );
@@ -395,74 +395,74 @@ meetingSchema.index({ host: 1, scheduledStart: 1 });
 meetingSchema.index({ classId: 1, scheduledStart: 1 });
 meetingSchema.index({ "invitees.user": 1 });
 meetingSchema.index({ status: 1, scheduledStart: 1 });
-meetingSchema.index({ meetingLink: 1 });
-meetingSchema.index({ meetingCode: 1 });
+// meetingSchema.index({ meetingLink: 1 });
+// meetingSchema.index({ meetingCode: 1 });
 meetingSchema.index({ parentMeeting: 1 });
 
 // Virtuals
-meetingSchema.virtual('isUpcoming').get(function() {
+meetingSchema.virtual('isUpcoming').get(function () {
   return this.status === MEETING_STATUS.SCHEDULED && new Date() < this.scheduledStart;
 });
 
-meetingSchema.virtual('isHappening').get(function() {
+meetingSchema.virtual('isHappening').get(function () {
   const now = new Date();
-  return this.status === MEETING_STATUS.ONGOING || 
-         (this.status === MEETING_STATUS.SCHEDULED && 
-          now >= this.scheduledStart && 
-          now <= this.scheduledEnd);
+  return this.status === MEETING_STATUS.ONGOING ||
+    (this.status === MEETING_STATUS.SCHEDULED &&
+      now >= this.scheduledStart &&
+      now <= this.scheduledEnd);
 });
 
-meetingSchema.virtual('isPast').get(function() {
-  return this.status === MEETING_STATUS.ENDED || 
-         (this.status === MEETING_STATUS.SCHEDULED && new Date() > this.scheduledEnd);
+meetingSchema.virtual('isPast').get(function () {
+  return this.status === MEETING_STATUS.ENDED ||
+    (this.status === MEETING_STATUS.SCHEDULED && new Date() > this.scheduledEnd);
 });
 
-meetingSchema.virtual('attendanceRate').get(function() {
+meetingSchema.virtual('attendanceRate').get(function () {
   if (this.invitees.length === 0) return 0;
   return (this.attendees.length / this.invitees.length * 100).toFixed(2);
 });
 
-meetingSchema.virtual('acceptanceRate').get(function() {
+meetingSchema.virtual('acceptanceRate').get(function () {
   if (this.invitees.length === 0) return 0;
   const accepted = this.invitees.filter(i => i.response === "accepted").length;
   return (accepted / this.invitees.length * 100).toFixed(2);
 });
 
-meetingSchema.virtual('averageRating').get(function() {
+meetingSchema.virtual('averageRating').get(function () {
   if (this.feedback.length === 0) return 0;
   const sum = this.feedback.reduce((acc, f) => acc + f.rating, 0);
   return (sum / this.feedback.length).toFixed(1);
 });
 
 // Methods
-meetingSchema.methods.generateMeetingCode = async function() {
+meetingSchema.methods.generateMeetingCode = async function () {
   const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let code = '';
   for (let i = 0; i < 10; i++) {
     code += characters.charAt(Math.floor(Math.random() * characters.length));
   }
-  
+
   this.meetingCode = code;
   this.meetingLink = `/meetings/join/${code}`;
-  
+
   return await this.save();
 };
 
-meetingSchema.methods.startMeeting = async function() {
+meetingSchema.methods.startMeeting = async function () {
   if (this.status !== MEETING_STATUS.SCHEDULED) {
     throw new Error("Can only start scheduled meetings");
   }
-  
+
   this.status = MEETING_STATUS.ONGOING;
   this.actualStart = new Date();
-  
+
   // Create associated call
   const Call = mongoose.model("Call");
-  
+
   const participantIds = this.invitees
     .filter(i => i.response === "accepted")
     .map(i => i.user);
-  
+
   try {
     const call = await Call.initiateCall({
       conversationId: this.conversation,
@@ -470,23 +470,23 @@ meetingSchema.methods.startMeeting = async function() {
       callType: "video",
       participantIds: [this.host, ...this.coHosts, ...participantIds],
     });
-    
+
     this.activeCall = call._id;
   } catch (error) {
     console.error("Error creating call for meeting:", error);
   }
-  
+
   return await this.save();
 };
 
-meetingSchema.methods.endMeeting = async function() {
+meetingSchema.methods.endMeeting = async function () {
   this.status = MEETING_STATUS.ENDED;
   this.actualEnd = new Date();
-  
+
   if (this.actualStart) {
     this.duration = Math.floor((this.actualEnd - this.actualStart) / 60000); // minutes
   }
-  
+
   // End associated call
   if (this.activeCall) {
     try {
@@ -499,22 +499,22 @@ meetingSchema.methods.endMeeting = async function() {
       console.error("Error ending call:", error);
     }
   }
-  
+
   // Send feedback request to attendees
   await this.sendFeedbackRequests();
-  
+
   return await this.save();
 };
 
-meetingSchema.methods.cancelMeeting = async function(reason = "") {
+meetingSchema.methods.cancelMeeting = async function (reason = "") {
   this.status = MEETING_STATUS.CANCELLED;
-  
+
   // Notify all invitees
   try {
     const Notification = mongoose.model("Notification");
     const User = mongoose.model("User");
     const host = await User.findById(this.host);
-    
+
     for (const invitee of this.invitees) {
       await Notification.createNotification({
         recipientId: invitee.user,
@@ -528,38 +528,38 @@ meetingSchema.methods.cancelMeeting = async function(reason = "") {
   } catch (error) {
     console.error("Error sending cancellation notifications:", error);
   }
-  
+
   return await this.save();
 };
 
-meetingSchema.methods.respondToInvite = async function(userId, response) {
+meetingSchema.methods.respondToInvite = async function (userId, response) {
   const invitee = this.invitees.find(i => i.user.equals(userId));
-  
+
   if (invitee) {
     invitee.response = response;
     invitee.respondedAt = new Date();
     await this.save();
   }
-  
+
   return this;
 };
 
-meetingSchema.methods.admitFromWaitingRoom = async function(userId, admittedBy) {
+meetingSchema.methods.admitFromWaitingRoom = async function (userId, admittedBy) {
   const waitingUser = this.waitingRoom.find(w => w.user.equals(userId) && !w.admitted);
-  
+
   if (waitingUser) {
     waitingUser.admitted = true;
     waitingUser.admittedAt = new Date();
     waitingUser.admittedBy = admittedBy;
     await this.save();
   }
-  
+
   return this;
 };
 
-meetingSchema.methods.markAttendance = async function(userId, joinedAt, leftAt = null) {
+meetingSchema.methods.markAttendance = async function (userId, joinedAt, leftAt = null) {
   const existing = this.attendees.find(a => a.user.equals(userId));
-  
+
   if (!existing) {
     const attendance = {
       user: userId,
@@ -567,21 +567,21 @@ meetingSchema.methods.markAttendance = async function(userId, joinedAt, leftAt =
       leftAt,
       wasPresent: true,
     };
-    
+
     if (leftAt) {
       attendance.duration = Math.floor((leftAt - joinedAt) / 60000); // minutes
     }
-    
+
     this.attendees.push(attendance);
   } else if (leftAt && !existing.leftAt) {
     existing.leftAt = leftAt;
     existing.duration = Math.floor((leftAt - existing.joinedAt) / 60000);
   }
-  
+
   return await this.save();
 };
 
-meetingSchema.methods.addRecording = async function(recordingData) {
+meetingSchema.methods.addRecording = async function (recordingData) {
   this.recordings.push({
     ...recordingData,
     uploadedAt: new Date(),
@@ -589,7 +589,7 @@ meetingSchema.methods.addRecording = async function(recordingData) {
   return await this.save();
 };
 
-meetingSchema.methods.addChatMessage = async function(userId, message, isPrivate = false, recipientId = null) {
+meetingSchema.methods.addChatMessage = async function (userId, message, isPrivate = false, recipientId = null) {
   this.chatMessages.push({
     user: userId,
     message,
@@ -599,7 +599,7 @@ meetingSchema.methods.addChatMessage = async function(userId, message, isPrivate
   return await this.save();
 };
 
-meetingSchema.methods.createPoll = async function(creatorId, question, options) {
+meetingSchema.methods.createPoll = async function (creatorId, question, options) {
   this.polls.push({
     question,
     options: options.map(opt => ({ text: opt, votes: [] })),
@@ -608,47 +608,47 @@ meetingSchema.methods.createPoll = async function(creatorId, question, options) 
   return await this.save();
 };
 
-meetingSchema.methods.votePoll = async function(pollIndex, optionIndex, userId) {
+meetingSchema.methods.votePoll = async function (pollIndex, optionIndex, userId) {
   const poll = this.polls[pollIndex];
-  
+
   if (!poll || !poll.isActive) {
     throw new Error("Poll not found or inactive");
   }
-  
+
   // Remove previous vote from this user
   poll.options.forEach(opt => {
     opt.votes = opt.votes.filter(v => !v.equals(userId));
   });
-  
+
   // Add new vote
   poll.options[optionIndex].votes.push(userId);
-  
+
   return await this.save();
 };
 
-meetingSchema.methods.raiseHand = async function(userId) {
+meetingSchema.methods.raiseHand = async function (userId) {
   const existing = this.raisedHands.find(r => r.user.equals(userId) && !r.loweredAt);
-  
+
   if (!existing) {
     this.raisedHands.push({ user: userId });
     await this.save();
   }
-  
+
   return this;
 };
 
-meetingSchema.methods.lowerHand = async function(userId) {
+meetingSchema.methods.lowerHand = async function (userId) {
   const raised = this.raisedHands.find(r => r.user.equals(userId) && !r.loweredAt);
-  
+
   if (raised) {
     raised.loweredAt = new Date();
     await this.save();
   }
-  
+
   return this;
 };
 
-meetingSchema.methods.createBreakoutRoom = async function(name, participantIds) {
+meetingSchema.methods.createBreakoutRoom = async function (name, participantIds) {
   this.breakoutRooms.push({
     name,
     participants: participantIds,
@@ -656,26 +656,26 @@ meetingSchema.methods.createBreakoutRoom = async function(name, participantIds) 
   return await this.save();
 };
 
-meetingSchema.methods.addActionItem = async function(actionItem) {
+meetingSchema.methods.addActionItem = async function (actionItem) {
   this.actionItems.push(actionItem);
   return await this.save();
 };
 
-meetingSchema.methods.completeActionItem = async function(actionItemId) {
+meetingSchema.methods.completeActionItem = async function (actionItemId) {
   const item = this.actionItems.id(actionItemId);
-  
+
   if (item) {
     item.completed = true;
     item.completedAt = new Date();
     await this.save();
   }
-  
+
   return this;
 };
 
-meetingSchema.methods.submitFeedback = async function(userId, rating, comment = "") {
+meetingSchema.methods.submitFeedback = async function (userId, rating, comment = "") {
   const existing = this.feedback.find(f => f.user.equals(userId));
-  
+
   if (existing) {
     existing.rating = rating;
     existing.comment = comment;
@@ -687,21 +687,21 @@ meetingSchema.methods.submitFeedback = async function(userId, rating, comment = 
       comment,
     });
   }
-  
+
   return await this.save();
 };
 
-meetingSchema.methods.sendReminders = async function() {
+meetingSchema.methods.sendReminders = async function () {
   const now = new Date();
   const minutesUntilMeeting = Math.floor((this.scheduledStart - now) / 60000);
-  
+
   for (const reminder of this.reminders) {
     if (!reminder.sent && minutesUntilMeeting <= reminder.time && minutesUntilMeeting > 0) {
       try {
         const Notification = mongoose.model("Notification");
         const User = mongoose.model("User");
         const host = await User.findById(this.host);
-        
+
         for (const invitee of this.invitees) {
           if (invitee.response !== "declined") {
             await Notification.createNotification({
@@ -716,7 +716,7 @@ meetingSchema.methods.sendReminders = async function() {
             });
           }
         }
-        
+
         reminder.sent = true;
         reminder.sentAt = new Date();
       } catch (error) {
@@ -724,14 +724,14 @@ meetingSchema.methods.sendReminders = async function() {
       }
     }
   }
-  
+
   return await this.save();
 };
 
-meetingSchema.methods.sendFeedbackRequests = async function() {
+meetingSchema.methods.sendFeedbackRequests = async function () {
   try {
     const Notification = mongoose.model("Notification");
-    
+
     for (const attendee of this.attendees) {
       await Notification.createNotification({
         recipientId: attendee.user,
@@ -747,11 +747,11 @@ meetingSchema.methods.sendFeedbackRequests = async function() {
 };
 
 // Static methods
-meetingSchema.statics.findUpcoming = function(userId, days = 30) {
+meetingSchema.statics.findUpcoming = function (userId, days = 30) {
   const now = new Date();
   const endDate = new Date();
   endDate.setDate(endDate.getDate() + days);
-  
+
   return this.find({
     $or: [
       { host: userId },
@@ -761,44 +761,44 @@ meetingSchema.statics.findUpcoming = function(userId, days = 30) {
     status: MEETING_STATUS.SCHEDULED,
     scheduledStart: { $gte: now, $lte: endDate },
   })
-  .populate("host", "firstName lastName username profilePicture")
-  .populate("coHosts", "firstName lastName username profilePicture")
-  .populate("classId", "name code")
-  .sort({ scheduledStart: 1 });
+    .populate("host", "firstName lastName username profilePicture")
+    .populate("coHosts", "firstName lastName username profilePicture")
+    .populate("classId", "name code")
+    .sort({ scheduledStart: 1 });
 };
 
-meetingSchema.statics.findByClass = function(classId, includeEnded = false) {
+meetingSchema.statics.findByClass = function (classId, includeEnded = false) {
   const query = {
     classId,
-    status: includeEnded 
+    status: includeEnded
       ? { $in: [MEETING_STATUS.SCHEDULED, MEETING_STATUS.ONGOING, MEETING_STATUS.ENDED] }
       : { $in: [MEETING_STATUS.SCHEDULED, MEETING_STATUS.ONGOING] },
   };
-  
+
   return this.find(query)
     .populate("host", "firstName lastName username profilePicture")
     .sort({ scheduledStart: -1 });
 };
 
-meetingSchema.statics.findByMeetingCode = function(code) {
+meetingSchema.statics.findByMeetingCode = function (code) {
   return this.findOne({
     meetingCode: code.toUpperCase(),
     status: { $in: [MEETING_STATUS.SCHEDULED, MEETING_STATUS.ONGOING] },
   })
-  .populate("host", "firstName lastName username profilePicture")
-  .populate("coHosts", "firstName lastName username profilePicture");
+    .populate("host", "firstName lastName username profilePicture")
+    .populate("coHosts", "firstName lastName username profilePicture");
 };
 
-meetingSchema.statics.scheduleMeeting = async function(meetingData) {
+meetingSchema.statics.scheduleMeeting = async function (meetingData) {
   const meeting = await this.create(meetingData);
   await meeting.generateMeetingCode();
-  
+
   // Send invitations
   try {
     const Notification = mongoose.model("Notification");
     const User = mongoose.model("User");
     const host = await User.findById(meeting.host);
-    
+
     for (const invitee of meeting.invitees) {
       await Notification.createNotification({
         recipientId: invitee.user,
@@ -809,47 +809,47 @@ meetingSchema.statics.scheduleMeeting = async function(meetingData) {
         actionUrl: `/meetings/${meeting._id}`,
         channels: { inApp: true, email: true },
       });
-      
+
       invitee.notificationSent = true;
     }
-    
+
     await meeting.save();
   } catch (error) {
     console.error("Error sending meeting invitations:", error);
   }
-  
+
   // Create recurring meetings if needed
   if (meeting.recurrence !== MEETING_RECURRENCE.NONE) {
     await meeting.createRecurringMeetings();
   }
-  
+
   return meeting;
 };
 
-meetingSchema.methods.createRecurringMeetings = async function() {
+meetingSchema.methods.createRecurringMeetings = async function () {
   if (this.recurrence === MEETING_RECURRENCE.NONE) return [];
-  
+
   const meetings = [];
   let currentDate = new Date(this.scheduledStart);
   const endDate = this.recurrenceEndDate || new Date(currentDate.getTime() + 90 * 24 * 60 * 60 * 1000); // 90 days default
-  
+
   const daysToAdd = {
     [MEETING_RECURRENCE.DAILY]: 1,
     [MEETING_RECURRENCE.WEEKLY]: 7,
     [MEETING_RECURRENCE.BIWEEKLY]: 14,
     [MEETING_RECURRENCE.MONTHLY]: 30,
   };
-  
+
   const increment = daysToAdd[this.recurrence];
-  
+
   while (currentDate < endDate) {
     currentDate.setDate(currentDate.getDate() + increment);
-    
+
     if (currentDate >= endDate) break;
-    
+
     const duration = (this.scheduledEnd - this.scheduledStart) / 1000 / 60; // minutes
     const newEnd = new Date(currentDate.getTime() + duration * 60 * 1000);
-    
+
     const recurringMeeting = await mongoose.model("Meeting").create({
       ...this.toObject(),
       _id: undefined,
@@ -869,11 +869,11 @@ meetingSchema.methods.createRecurringMeetings = async function() {
       actualEnd: undefined,
       duration: undefined,
     });
-    
+
     await recurringMeeting.generateMeetingCode();
     meetings.push(recurringMeeting);
   }
-  
+
   return meetings;
 };
 
@@ -883,5 +883,5 @@ const Meeting = mongoose.model("Meeting", meetingSchema);
 // EXPORTS
 // ============================================
 
-export default Meeting;
-export { MEETING_TYPES, MEETING_STATUS, MEETING_RECURRENCE };
+// export default Meeting;
+export { Meeting, MEETING_TYPES, MEETING_STATUS, MEETING_RECURRENCE };

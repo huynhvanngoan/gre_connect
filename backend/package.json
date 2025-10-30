@@ -19,6 +19,7 @@
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
+    "@arcjet/node": "^1.0.0-beta.13",
     "@clerk/clerk-sdk-node": "^4.13.1",
     "@clerk/express": "^1.7.42",
     "bcryptjs": "^2.4.3",

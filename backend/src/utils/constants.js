@@ -18,35 +18,35 @@ export const PERMISSIONS = {
     EDIT_POST: "edit_post",
     DELETE_POST: "delete_post",
     PIN_POST: "pin_post",
-    
+
     // Announcement permissions
     CREATE_ANNOUNCEMENT: "create_announcement",
     EDIT_ANNOUNCEMENT: "edit_announcement",
     DELETE_ANNOUNCEMENT: "delete_announcement",
-    
+
     // Homework permissions
     CREATE_HOMEWORK: "create_homework",
     EDIT_HOMEWORK: "edit_homework",
     DELETE_HOMEWORK: "delete_homework",
     GRADE_HOMEWORK: "grade_homework",
     VIEW_GRADES: "view_grades",
-    
+
     // Class permissions
     CREATE_CLASS: "create_class",
     EDIT_CLASS: "edit_class",
     DELETE_CLASS: "delete_class",
     MANAGE_CLASSES: "manage_classes",
     VIEW_ALL_CLASSES: "view_all_classes",
-    
+
     // User permissions
     MANAGE_USERS: "manage_users",
     BAN_USER: "ban_user",
     VIEW_ALL_USERS: "view_all_users",
-    
+
     // Comment permissions
     MODERATE_COMMENTS: "moderate_comments",
     DELETE_ANY_COMMENT: "delete_any_comment",
-    
+
     // Meeting permissions
     CREATE_MEETING: "create_meeting",
     START_MEETING: "start_meeting",
@@ -151,14 +151,14 @@ export const NOTIFICATION_TYPES = {
     POST_COMMENT: "post_comment",
     POST_SHARE: "post_share",
     POST_MENTION: "post_mention",
-    
+
     // Homework notifications
     NEW_HOMEWORK: "new_homework",
     HOMEWORK_ASSIGNED: "homework_assigned",
     HOMEWORK_DUE_SOON: "homework_due_soon",
     HOMEWORK_GRADED: "homework_graded",
     HOMEWORK_SUBMITTED: "homework_submitted",
-    
+
     // Class notifications
     CLASS_ANNOUNCEMENT: "class_announcement",
     NEW_ANNOUNCEMENT: "new_announcement",
@@ -168,41 +168,41 @@ export const NOTIFICATION_TYPES = {
     CLASS_SCHEDULE_CHANGE: "class_schedule_change",
     CLASS_JOINED: "class_joined",
     CLASS_REMOVED: "class_removed",
-    
+
     // User notifications
     NEW_FOLLOWER: "new_follower",
     FOLLOW_REQUEST: "follow_request",
     MENTION: "mention",
-    
+
     // Comment notifications
     COMMENT_REPLY: "comment_reply",
     COMMENT_LIKE: "comment_like",
     COMMENT_MENTION: "comment_mention",
-    
+
     // Event notifications
     EVENT_INVITATION: "event_invitation",
     EVENT_REMINDER: "event_reminder",
     EVENT_UPDATED: "event_updated",
     EVENT_CANCELLED: "event_cancelled",
-    
+
     // Poll notifications
     POLL_CREATED: "poll_created",
     POLL_ENDING_SOON: "poll_ending_soon",
     POLL_RESULTS: "poll_results",
-    
+
     // Meeting notifications
     MEETING_INVITATION: "meeting_invitation",
     MEETING_STARTED: "meeting_started",
     MEETING_REMINDER: "meeting_reminder",
     MEETING_CANCELLED: "meeting_cancelled",
-    
+
     // Message notifications
     NEW_MESSAGE: "new_message",
-    
+
     // Call notifications
     INCOMING_CALL: "incoming_call",
     MISSED_CALL: "missed_call",
-    
+
     // System notifications
     WELCOME: "welcome",
     SYSTEM_UPDATE: "system_update",
@@ -399,21 +399,21 @@ export const ERROR_CODES = {
     UNAUTHORIZED: "UNAUTHORIZED",
     INVALID_TOKEN: "INVALID_TOKEN",
     TOKEN_EXPIRED: "TOKEN_EXPIRED",
-    
+
     // Authorization errors
     FORBIDDEN: "FORBIDDEN",
     INSUFFICIENT_PERMISSIONS: "INSUFFICIENT_PERMISSIONS",
-    
+
     // Validation errors
     VALIDATION_ERROR: "VALIDATION_ERROR",
     INVALID_INPUT: "INVALID_INPUT",
     MISSING_REQUIRED_FIELD: "MISSING_REQUIRED_FIELD",
-    
+
     // Resource errors
     NOT_FOUND: "NOT_FOUND",
     ALREADY_EXISTS: "ALREADY_EXISTS",
     CONFLICT: "CONFLICT",
-    
+
     // Server errors
     INTERNAL_ERROR: "INTERNAL_ERROR",
     DATABASE_ERROR: "DATABASE_ERROR",
@@ -429,22 +429,22 @@ export const SUCCESS_MESSAGES = {
     USER_CREATED: "User created successfully",
     USER_UPDATED: "User updated successfully",
     USER_DELETED: "User deleted successfully",
-    
+
     // Auth messages
     LOGIN_SUCCESS: "Login successful",
     LOGOUT_SUCCESS: "Logout successful",
     PASSWORD_CHANGED: "Password changed successfully",
-    
+
     // Post messages
     POST_CREATED: "Post created successfully",
     POST_UPDATED: "Post updated successfully",
     POST_DELETED: "Post deleted successfully",
-    
+
     // Comment messages
     COMMENT_CREATED: "Comment created successfully",
     COMMENT_UPDATED: "Comment updated successfully",
     COMMENT_DELETED: "Comment deleted successfully",
-    
+
     // Generic messages
     SUCCESS: "Operation completed successfully",
     CREATED: "Resource created successfully",
@@ -462,17 +462,17 @@ export const ERROR_MESSAGES = {
     UNAUTHORIZED: "You are not authorized to perform this action",
     TOKEN_MISSING: "Authentication token is missing",
     TOKEN_INVALID: "Invalid authentication token",
-    
+
     // User errors
     USER_NOT_FOUND: "User not found",
     USER_ALREADY_EXISTS: "User already exists",
     USER_INACTIVE: "User account is inactive",
     USER_BANNED: "User account is banned",
-    
+
     // Validation errors
     INVALID_INPUT: "Invalid input provided",
     MISSING_REQUIRED_FIELDS: "Missing required fields",
-    
+
     // Generic errors
     INTERNAL_ERROR: "Internal server error",
     NOT_FOUND: "Resource not found",
@@ -731,6 +731,69 @@ export const LANGUAGE_CODES = {
     KO: "ko",
 };
 
+
+// ============================================
+// SOCKET EVENTS
+// ============================================
+
+export const SOCKET_EVENTS = {
+    // Connection
+    CONNECT: "connect",
+    DISCONNECT: "disconnect",
+    JOIN: "join",
+    LEAVE: "leave",
+
+    // User presence
+    USER_ONLINE: "user-online",
+    USER_OFFLINE: "user-offline",
+    USER_TYPING: "user-typing",
+
+    // Messages
+    NEW_MESSAGE: "new-message",
+    MESSAGE_DELIVERED: "message-delivered",
+    MESSAGE_READ: "message-read",
+    MESSAGE_DELETED: "message-deleted",
+    MESSAGE_EDITED: "message-edited",
+
+    // Conversations
+    JOIN_CONVERSATION: "join-conversation",
+    LEAVE_CONVERSATION: "leave-conversation",
+    CONVERSATION_UPDATED: "conversation-updated",
+
+    // Calls
+    CALL_OFFER: "call-offer",
+    CALL_ANSWER: "call-answer",
+    ICE_CANDIDATE: "ice-candidate",
+    CALL_RINGING: "call-ringing",
+    CALL_ACCEPTED: "call-accepted",
+    CALL_REJECTED: "call-rejected",
+    CALL_ENDED: "call-ended",
+
+    // Meetings
+    MEETING_STARTED: "meeting-started",
+    MEETING_ENDED: "meeting-ended",
+    PARTICIPANT_JOINED: "participant-joined",
+    PARTICIPANT_LEFT: "participant-left",
+    SCREEN_SHARE_STARTED: "screen-share-started",
+    SCREEN_SHARE_STOPPED: "screen-share-stopped",
+    RECORDING_STARTED: "recording-started",
+    RECORDING_STOPPED: "recording-stopped",
+    MEETING_CHAT_MESSAGE: "meeting-chat-message",
+
+    // Posts
+    NEW_POST: "new-post",
+    POST_UPDATED: "post-updated",
+    POST_DELETED: "post-deleted",
+    NEW_COMMENT: "new-comment",
+    COMMENT_DELETED: "comment-deleted",
+
+    // Notifications
+    NOTIFICATION: "notification",
+    NOTIFICATIONS_READ_ALL: "notifications-read-all",
+};
+
+
+
 // ============================================
 // EXPORT ALL
 // ============================================
@@ -783,4 +846,5 @@ export default {
     NOTIFICATION_CHANNELS,
     USER_STATUS,
     LANGUAGE_CODES,
+    SOCKET_EVENTS
 };

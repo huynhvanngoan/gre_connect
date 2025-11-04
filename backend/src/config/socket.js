@@ -1,5 +1,6 @@
 import { Server } from "socket.io";
 import { ENV } from "./env.js";
+import { logger } from "../utils/logger.js";
 
 let io;
 
@@ -13,26 +14,28 @@ export const initSocket = (server) => {
   });
 
   io.on("connection", (socket) => {
-    console.log(`✅ User connected: ${socket.id}`);
+    logger.info(`✅ User connected: ${socket.id}`);
 
     // Join user to their own room
     socket.on("join", (userId) => {
       socket.join(userId);
-      console.log(`User ${userId} joined their room`);
+      logger.debug(`User ${userId} joined their room`);
     });
 
     // Join conversation room
     socket.on("join-conversation", (conversationId) => {
       socket.join(`conversation-${conversationId}`);
+      logger.debug(`Socket ${socket.id} joined conversation ${conversationId}`);
     });
 
     // Leave conversation room
     socket.on("leave-conversation", (conversationId) => {
       socket.leave(`conversation-${conversationId}`);
+      logger.debug(`Socket ${socket.id} left conversation ${conversationId}`);
     });
 
     socket.on("disconnect", () => {
-      console.log(`❌ User disconnected: ${socket.id}`);
+      logger.info(`❌ User disconnected: ${socket.id}`);
     });
   });
 

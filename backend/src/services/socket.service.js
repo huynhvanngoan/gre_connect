@@ -1,4 +1,5 @@
 import { getIO } from "../config/socket.js";
+import { logger } from "../utils/logger.js";
 
 // ============================================
 // USER PRESENCE
@@ -9,11 +10,11 @@ import { getIO } from "../config/socket.js";
  */
 export const handleUserOnline = (userId) => {
     const io = getIO();
-    
+
     // Broadcast to all connected clients
     io.emit("user-online", { userId });
-    
-    console.log(`✅ User ${userId} is online`);
+
+    logger.info(`✅ User ${userId} is online`);
 };
 
 /**
@@ -21,11 +22,11 @@ export const handleUserOnline = (userId) => {
  */
 export const handleUserOffline = (userId) => {
     const io = getIO();
-    
+
     // Broadcast to all connected clients
     io.emit("user-offline", { userId });
-    
-    console.log(`❌ User ${userId} is offline`);
+
+    logger.info(`❌ User ${userId} is offline`);
 };
 
 /**
@@ -45,7 +46,7 @@ export const getOnlineUsersCount = () => {
  */
 export const handleTyping = (conversationId, userId, isTyping) => {
     const io = getIO();
-    
+
     // Broadcast to conversation room (except sender)
     io.to(`conversation-${conversationId}`).emit("user-typing", {
         conversationId,
@@ -54,18 +55,6 @@ export const handleTyping = (conversationId, userId, isTyping) => {
     });
 };
 
-/**
- * Handle user typing in meeting chat
- */
-export const handleMeetingTyping = (meetingId, userId, isTyping) => {
-    const io = getIO();
-    
-    io.to(`meeting-${meetingId}`).emit("user-typing-meeting", {
-        meetingId,
-        userId,
-        isTyping,
-    });
-};
 
 // ============================================
 // MESSAGE DELIVERY STATUS
@@ -76,7 +65,7 @@ export const handleMeetingTyping = (meetingId, userId, isTyping) => {
  */
 export const emitMessageSent = (conversationId, message) => {
     const io = getIO();
-    
+
     io.to(`conversation-${conversationId}`).emit("new-message", {
         conversationId,
         message,
@@ -88,7 +77,7 @@ export const emitMessageSent = (conversationId, message) => {
  */
 export const emitMessageDelivered = (messageId, userId) => {
     const io = getIO();
-    
+
     io.to(userId.toString()).emit("message-delivered", {
         messageId,
     });
@@ -99,7 +88,7 @@ export const emitMessageDelivered = (messageId, userId) => {
  */
 export const emitMessageRead = (conversationId, messageIds, userId) => {
     const io = getIO();
-    
+
     io.to(`conversation-${conversationId}`).emit("messages-read", {
         conversationId,
         messageIds,
@@ -112,7 +101,7 @@ export const emitMessageRead = (conversationId, messageIds, userId) => {
  */
 export const emitMessageDeleted = (conversationId, messageId) => {
     const io = getIO();
-    
+
     io.to(`conversation-${conversationId}`).emit("message-deleted", {
         conversationId,
         messageId,
@@ -124,221 +113,14 @@ export const emitMessageDeleted = (conversationId, messageId) => {
  */
 export const emitMessageEdited = (conversationId, message) => {
     const io = getIO();
-    
+
     io.to(`conversation-${conversationId}`).emit("message-edited", {
         conversationId,
         message,
     });
 };
 
-// ============================================
-// CALL SIGNALING
-// ============================================
 
-/**
- * Send WebRTC offer
- */
-export const sendCallOffer = (callId, fromUserId, toUserId, offer) => {
-    const io = getIO();
-    
-    io.to(toUserId.toString()).emit("call-offer", {
-        callId,
-        from: fromUserId,
-        offer,
-    });
-};
-
-/**
- * Send WebRTC answer
- */
-export const sendCallAnswer = (callId, fromUserId, toUserId, answer) => {
-    const io = getIO();
-    
-    io.to(toUserId.toString()).emit("call-answer", {
-        callId,
-        from: fromUserId,
-        answer,
-    });
-};
-
-/**
- * Send ICE candidate
- */
-export const sendIceCandidate = (callId, fromUserId, toUserId, candidate) => {
-    const io = getIO();
-    
-    io.to(toUserId.toString()).emit("ice-candidate", {
-        callId,
-        from: fromUserId,
-        candidate,
-    });
-};
-
-/**
- * Emit call ringing
- */
-export const emitCallRinging = (callId, participants) => {
-    const io = getIO();
-    
-    participants.forEach(userId => {
-        io.to(userId.toString()).emit("call-ringing", {
-            callId,
-        });
-    });
-};
-
-/**
- * Emit call accepted
- */
-export const emitCallAccepted = (callId, userId, participants) => {
-    const io = getIO();
-    
-    participants.forEach(participantId => {
-        if (participantId.toString() !== userId.toString()) {
-            io.to(participantId.toString()).emit("call-accepted", {
-                callId,
-                userId,
-            });
-        }
-    });
-};
-
-/**
- * Emit call rejected
- */
-export const emitCallRejected = (callId, userId, callerId) => {
-    const io = getIO();
-    
-    io.to(callerId.toString()).emit("call-rejected", {
-        callId,
-        userId,
-    });
-};
-
-/**
- * Emit call ended
- */
-export const emitCallEnded = (callId, participants) => {
-    const io = getIO();
-    
-    participants.forEach(userId => {
-        io.to(userId.toString()).emit("call-ended", {
-            callId,
-        });
-    });
-};
-
-// ============================================
-// MEETING EVENTS
-// ============================================
-
-/**
- * Emit meeting started
- */
-export const emitMeetingStarted = (meetingId, participants) => {
-    const io = getIO();
-    
-    participants.forEach(userId => {
-        io.to(userId.toString()).emit("meeting-started", {
-            meetingId,
-        });
-    });
-};
-
-/**
- * Emit participant joined meeting
- */
-export const emitParticipantJoinedMeeting = (meetingId, user) => {
-    const io = getIO();
-    
-    io.to(`meeting-${meetingId}`).emit("participant-joined", {
-        meetingId,
-        user,
-    });
-};
-
-/**
- * Emit participant left meeting
- */
-export const emitParticipantLeftMeeting = (meetingId, userId) => {
-    const io = getIO();
-    
-    io.to(`meeting-${meetingId}`).emit("participant-left", {
-        meetingId,
-        userId,
-    });
-};
-
-/**
- * Emit meeting ended
- */
-export const emitMeetingEnded = (meetingId, participants) => {
-    const io = getIO();
-    
-    participants.forEach(userId => {
-        io.to(userId.toString()).emit("meeting-ended", {
-            meetingId,
-        });
-    });
-};
-
-/**
- * Emit screen share started
- */
-export const emitScreenShareStarted = (meetingId, userId) => {
-    const io = getIO();
-    
-    io.to(`meeting-${meetingId}`).emit("screen-share-started", {
-        meetingId,
-        userId,
-    });
-};
-
-/**
- * Emit screen share stopped
- */
-export const emitScreenShareStopped = (meetingId, userId) => {
-    const io = getIO();
-    
-    io.to(`meeting-${meetingId}`).emit("screen-share-stopped", {
-        meetingId,
-        userId,
-    });
-};
-
-/**
- * Emit recording started
- */
-export const emitRecordingStarted = (meetingId) => {
-    const io = getIO();
-    
-    io.to(`meeting-${meetingId}`).emit("recording-started", {
-        meetingId,
-    });
-};
-
-/**
- * Emit recording stopped
- */
-export const emitRecordingStopped = (meetingId) => {
-    const io = getIO();
-    
-    io.to(`meeting-${meetingId}`).emit("recording-stopped", {
-        meetingId,
-    });
-};
-
-/**
- * Send meeting chat message
- */
-export const sendMeetingChatMessage = (meetingId, message) => {
-    const io = getIO();
-    
-    io.to(`meeting-${meetingId}`).emit("meeting-chat-message", {
-        meetingId,
-        message,
-    });
-};
 
 // ============================================
 // NOTIFICATIONS
@@ -349,7 +131,7 @@ export const sendMeetingChatMessage = (meetingId, message) => {
  */
 export const sendNotification = (userId, notification) => {
     const io = getIO();
-    
+
     io.to(userId.toString()).emit("notification", notification);
 };
 
@@ -358,7 +140,7 @@ export const sendNotification = (userId, notification) => {
  */
 export const broadcastNotification = (userIds, notification) => {
     const io = getIO();
-    
+
     userIds.forEach(userId => {
         io.to(userId.toString()).emit("notification", notification);
     });
@@ -373,7 +155,7 @@ export const broadcastNotification = (userIds, notification) => {
  */
 export const broadcastToClass = (classId, event, data) => {
     const io = getIO();
-    
+
     io.to(`class-${classId}`).emit(event, data);
 };
 
@@ -382,7 +164,7 @@ export const broadcastToClass = (classId, event, data) => {
  */
 export const broadcastToConversation = (conversationId, event, data) => {
     const io = getIO();
-    
+
     io.to(`conversation-${conversationId}`).emit(event, data);
 };
 
@@ -391,7 +173,7 @@ export const broadcastToConversation = (conversationId, event, data) => {
  */
 export const broadcastToAll = (event, data) => {
     const io = getIO();
-    
+
     io.emit(event, data);
 };
 
@@ -404,7 +186,7 @@ export const broadcastToAll = (event, data) => {
  */
 export const emitNewPost = (classId, post) => {
     const io = getIO();
-    
+
     if (classId) {
         io.to(`class-${classId}`).emit("new-post", { post });
     } else {
@@ -417,7 +199,7 @@ export const emitNewPost = (classId, post) => {
  */
 export const emitPostUpdated = (postId, updates) => {
     const io = getIO();
-    
+
     io.emit("post-updated", { postId, updates });
 };
 
@@ -426,7 +208,7 @@ export const emitPostUpdated = (postId, updates) => {
  */
 export const emitPostDeleted = (postId) => {
     const io = getIO();
-    
+
     io.emit("post-deleted", { postId });
 };
 
@@ -435,7 +217,7 @@ export const emitPostDeleted = (postId) => {
  */
 export const emitNewComment = (postId, comment) => {
     const io = getIO();
-    
+
     io.to(`post-${postId}`).emit("new-comment", {
         postId,
         comment,
@@ -447,7 +229,7 @@ export const emitNewComment = (postId, comment) => {
  */
 export const emitCommentDeleted = (postId, commentId) => {
     const io = getIO();
-    
+
     io.to(`post-${postId}`).emit("comment-deleted", {
         postId,
         commentId,
@@ -463,7 +245,7 @@ export const emitCommentDeleted = (postId, commentId) => {
  */
 export const joinConversationRoom = (socket, conversationId) => {
     socket.join(`conversation-${conversationId}`);
-    console.log(`Socket ${socket.id} joined conversation-${conversationId}`);
+    logger.debug(`Socket ${socket.id} joined conversation-${conversationId}`);
 };
 
 /**
@@ -471,31 +253,16 @@ export const joinConversationRoom = (socket, conversationId) => {
  */
 export const leaveConversationRoom = (socket, conversationId) => {
     socket.leave(`conversation-${conversationId}`);
-    console.log(`Socket ${socket.id} left conversation-${conversationId}`);
+    logger.debug(`Socket ${socket.id} left conversation-${conversationId}`);
 };
 
-/**
- * Join user to meeting room
- */
-export const joinMeetingRoom = (socket, meetingId) => {
-    socket.join(`meeting-${meetingId}`);
-    console.log(`Socket ${socket.id} joined meeting-${meetingId}`);
-};
-
-/**
- * Leave meeting room
- */
-export const leaveMeetingRoom = (socket, meetingId) => {
-    socket.leave(`meeting-${meetingId}`);
-    console.log(`Socket ${socket.id} left meeting-${meetingId}`);
-};
 
 /**
  * Join user to class room
  */
 export const joinClassRoom = (socket, classId) => {
     socket.join(`class-${classId}`);
-    console.log(`Socket ${socket.id} joined class-${classId}`);
+    logger.debug(`Socket ${socket.id} joined class-${classId}`);
 };
 
 /**
@@ -503,7 +270,7 @@ export const joinClassRoom = (socket, classId) => {
  */
 export const leaveClassRoom = (socket, classId) => {
     socket.leave(`class-${classId}`);
-    console.log(`Socket ${socket.id} left class-${classId}`);
+    logger.debug(`Socket ${socket.id} left class-${classId}`);
 };
 
 /**
@@ -511,7 +278,7 @@ export const leaveClassRoom = (socket, classId) => {
  */
 export const joinPostRoom = (socket, postId) => {
     socket.join(`post-${postId}`);
-    console.log(`Socket ${socket.id} joined post-${postId}`);
+    logger.debug(`Socket ${socket.id} joined post-${postId}`);
 };
 
 /**
@@ -519,7 +286,7 @@ export const joinPostRoom = (socket, postId) => {
  */
 export const leavePostRoom = (socket, postId) => {
     socket.leave(`post-${postId}`);
-    console.log(`Socket ${socket.id} left post-${postId}`);
+    logger.debug(`Socket ${socket.id} left post-${postId}`);
 };
 
 // ============================================
@@ -531,59 +298,36 @@ export default {
     handleUserOnline,
     handleUserOffline,
     getOnlineUsersCount,
-    
+
     // Typing
     handleTyping,
-    handleMeetingTyping,
-    
+
     // Messages
     emitMessageSent,
     emitMessageDelivered,
     emitMessageRead,
     emitMessageDeleted,
     emitMessageEdited,
-    
-    // Calls
-    sendCallOffer,
-    sendCallAnswer,
-    sendIceCandidate,
-    emitCallRinging,
-    emitCallAccepted,
-    emitCallRejected,
-    emitCallEnded,
-    
-    // Meetings
-    emitMeetingStarted,
-    emitParticipantJoinedMeeting,
-    emitParticipantLeftMeeting,
-    emitMeetingEnded,
-    emitScreenShareStarted,
-    emitScreenShareStopped,
-    emitRecordingStarted,
-    emitRecordingStopped,
-    sendMeetingChatMessage,
-    
+
     // Notifications
     sendNotification,
     broadcastNotification,
-    
+
     // Broadcasts
     broadcastToClass,
     broadcastToConversation,
     broadcastToAll,
-    
+
     // Posts
     emitNewPost,
     emitPostUpdated,
     emitPostDeleted,
     emitNewComment,
     emitCommentDeleted,
-    
+
     // Room Management
     joinConversationRoom,
     leaveConversationRoom,
-    joinMeetingRoom,
-    leaveMeetingRoom,
     joinClassRoom,
     leaveClassRoom,
     joinPostRoom,

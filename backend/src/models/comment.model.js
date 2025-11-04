@@ -23,12 +23,10 @@ const commentSchema = new mongoose.Schema(
             enum: Object.values(COMMENT_TYPES),
             default: COMMENT_TYPES.TEXT,
         },
-        // For image/file comments
+        // For image/file comments (flexible object to avoid cast errors)
         media: {
-            url: String,
-            type: String, // 'image', 'video', 'file'
-            fileName: String,
-            fileSize: Number,
+            type: mongoose.Schema.Types.Mixed,
+            default: null,
         },
         // Nested comments (replies)
         parentComment: {

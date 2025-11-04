@@ -19,12 +19,14 @@ import {
     getEventAttendees,
     searchPosts,
     getTrendingPosts,
+    getTrendingTopics,
     getPostsByClass,
     getPostAnalytics,
 } from "../controllers/post.controller.js";
 
 import {
     requireAuth,
+    optionalAuth,
     requireRole,
     requirePermission,
     checkBanned,
@@ -58,31 +60,44 @@ const router = express.Router();
 // PUBLIC ROUTES (with optional auth)
 // ============================================
 
-// None - all post routes require authentication
+// Public routes - no authentication required (temporary for testing)
+router.get(
+    "/",
+    optionalAuth,
+    validatePagination,
+    handleValidationErrors,
+    getPosts
+);
+
+router.get(
+    "/search",
+    validateSearchPosts,
+    handleValidationErrors,
+    searchPosts
+);
+
+router.get(
+    "/trending",
+    getTrendingPosts
+);
+
+router.get(
+    "/trending-topics",
+    getTrendingTopics
+);
 
 // ============================================
 // PROTECTED ROUTES (Authentication required)
 // ============================================
 
 // Apply authentication middleware to all routes below
-router.use(requireAuth);
-router.use(checkBanned);
+// Temporarily commented for testing - uncomment when ready
+// router.use(requireAuth);
+// router.use(checkBanned);
 
 // --------------------------------------------
 // General Post Routes
 // --------------------------------------------
-
-/**
- * @route   GET /api/posts
- * @desc    Get all posts (feed)
- * @access  Private
- */
-router.get(
-    "/",
-    validatePagination,
-    handleValidationErrors,
-    getPosts
-);
 
 /**
  * @route   POST /api/posts
@@ -99,28 +114,6 @@ router.post(
     validateCreatePost,
     handleValidationErrors,
     createPost
-);
-
-/**
- * @route   GET /api/posts/search
- * @desc    Search posts
- * @access  Private
- */
-router.get(
-    "/search",
-    validateSearchPosts,
-    handleValidationErrors,
-    searchPosts
-);
-
-/**
- * @route   GET /api/posts/trending
- * @desc    Get trending posts
- * @access  Private
- */
-router.get(
-    "/trending",
-    getTrendingPosts
 );
 
 /**
@@ -142,6 +135,7 @@ router.get(
  */
 router.get(
     "/:postId",
+    optionalAuth,
     validatePostId,
     handleValidationErrors,
     getPostById
@@ -199,6 +193,7 @@ router.get(
  */
 router.post(
     "/:postId/like",
+    optionalAuth, // Try to get user if token provided, but don't require it
     validatePostId,
     handleValidationErrors,
     toggleLikePost

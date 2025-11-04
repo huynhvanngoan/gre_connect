@@ -387,9 +387,6 @@ callSchema.statics.initiateCall = async function (callData) {
       video: callType === CALL_TYPES.VIDEO,
       audio: true,
     })),
-    webrtcData: {
-      roomId: `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-    },
   });
 
   // Send notifications to participants

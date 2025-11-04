@@ -125,7 +125,7 @@ export const uploadCoverImage = async (buffer) => {
  * @param {String} type - File type (image, video, file)
  * @returns {Promise<Object>} Upload result
  */
-export const uploadPostAttachment = async (buffer, type = "auto") => {
+export const uploadPostAttachment = async (buffer, type = "auto", fileName = undefined) => {
   const folderMap = {
     image: "education-platform/posts/images",
     video: "education-platform/posts/videos",
@@ -140,10 +140,14 @@ export const uploadPostAttachment = async (buffer, type = "auto") => {
     auto: "auto",
   };
 
+  const isRaw = (resourceTypeMap[type] || "auto") === "raw";
   return await uploadToCloudinary(buffer, {
     folder: folderMap[type] || folderMap.auto,
     resourceType: resourceTypeMap[type] || "auto",
     quality: "auto",
+    use_filename: true,
+    filename_override: fileName,
+    flags: isRaw ? "attachment" : undefined,
   });
 };
 
@@ -217,7 +221,7 @@ export const deleteFromCloudinary = async (publicIdOrUrl, resourceType = "image"
     if (publicIdOrUrl.includes("cloudinary.com")) {
       const urlParts = publicIdOrUrl.split("/");
       const uploadIndex = urlParts.findIndex((part) => part === "upload");
-      
+
       if (uploadIndex !== -1) {
         const pathAfterUpload = urlParts.slice(uploadIndex + 2).join("/");
         publicId = pathAfterUpload.substring(0, pathAfterUpload.lastIndexOf("."));

@@ -44,7 +44,7 @@ const createArcjetMiddleware = (arcjetInstance, options = {}) => {
 
       // Log decision in development
       if (process.env.NODE_ENV !== "production") {
-        console.log("Arcjet Decision:", {
+        logger.debug("Arcjet Decision", {
           id: decision.id,
           conclusion: decision.conclusion,
           reason: decision.reason,
@@ -110,11 +110,11 @@ const createArcjetMiddleware = (arcjetInstance, options = {}) => {
       }
 
       // Log unexpected errors
-      console.error("Arcjet middleware error:", error);
+      logger.error("Arcjet middleware error", { error: error.message, stack: error.stack });
 
       // In production, fail open (allow request) on errors
       if (process.env.NODE_ENV === "production") {
-        console.error("Arcjet failed, allowing request through");
+        logger.warn("Arcjet failed, allowing request through");
         return next();
       }
 

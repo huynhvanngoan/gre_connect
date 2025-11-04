@@ -16,11 +16,16 @@ const storage = multer.memoryStorage();
 
 // File filter function
 const fileFilter = (req, file, cb) => {
-    // Accept images and videos
-    if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) {
+    // Accept images, videos, and common document types
+    const mime = (file.mimetype || '').toLowerCase();
+    const isImage = mime.startsWith("image/");
+    const isVideo = mime.startsWith("video/");
+    const isDoc = mime.startsWith("application/") || mime.startsWith("text/");
+
+    if (isImage || isVideo || isDoc) {
         cb(null, true);
     } else {
-        cb(new Error("Only image and video files are allowed"), false);
+        cb(new Error("Unsupported file type"), false);
     }
 };
 
@@ -47,14 +52,14 @@ export const uploadToCloudinary = {
                         message: err.message,
                     });
                 }
-                
+
                 if (!req.file) {
                     return next();
                 }
-                
+
                 try {
                     let result;
-                    
+
                     // Determine upload function based on field name
                     if (fieldName === "profilePicture" || fieldName === "image") {
                         result = await uploadProfilePicture(req.file.buffer);
@@ -65,8 +70,9 @@ export const uploadToCloudinary = {
                     } else if (fieldName === "attachment" || fieldName === "media") {
                         const fileType = getFileType(req.file.mimetype);
                         result = await uploadPostAttachment(
-                            req.file.buffer, 
-                            fileType
+                            req.file.buffer,
+                            fileType,
+                            req.file.originalname
                         );
                     } else {
                         // Default upload
@@ -74,12 +80,12 @@ export const uploadToCloudinary = {
                             folder: "education-platform/general",
                         });
                     }
-                    
+
                     // Add Cloudinary result to request
                     req.file.cloudinary = result;
                     req.file.path = result.secure_url;
                     req.file.publicId = result.public_id;
-                    
+
                     next();
                 } catch (error) {
                     console.error("Cloudinary upload error:", error);
@@ -92,7 +98,7 @@ export const uploadToCloudinary = {
             });
         };
     },
-    
+
     /**
      * Middleware to upload multiple files to Cloudinary
      */
@@ -105,20 +111,20 @@ export const uploadToCloudinary = {
                         message: err.message,
                     });
                 }
-                
+
                 if (!req.files || req.files.length === 0) {
                     return next();
                 }
-                
+
                 try {
                     // Upload all files to Cloudinary
                     const uploadPromises = req.files.map(file => {
                         const fileType = getFileType(file.mimetype);
-                        return uploadPostAttachment(file.buffer, fileType);
+                        return uploadPostAttachment(file.buffer, fileType, file.originalname);
                     });
-                    
+
                     const results = await Promise.all(uploadPromises);
-                    
+
                     // Add Cloudinary results to files
                     req.files = req.files.map((file, index) => ({
                         ...file,
@@ -126,7 +132,7 @@ export const uploadToCloudinary = {
                         path: results[index].secure_url,
                         publicId: results[index].public_id,
                     }));
-                    
+
                     next();
                 } catch (error) {
                     console.error("Cloudinary upload error:", error);
@@ -139,7 +145,7 @@ export const uploadToCloudinary = {
             });
         };
     },
-    
+
     /**
      * Middleware to upload fields (mixed single and multiple)
      */
@@ -152,31 +158,31 @@ export const uploadToCloudinary = {
                         message: err.message,
                     });
                 }
-                
+
                 if (!req.files || Object.keys(req.files).length === 0) {
                     return next();
                 }
-                
+
                 try {
                     // Upload all files to Cloudinary
                     for (const fieldName in req.files) {
                         const files = req.files[fieldName];
-                        
+
                         const uploadPromises = files.map(file => {
                             const fileType = getFileType(file.mimetype);
-                            
+
                             // Choose upload function based on field name
                             if (fieldName.includes("profile") || fieldName.includes("avatar")) {
                                 return uploadProfilePicture(file.buffer);
                             } else if (fieldName.includes("banner") || fieldName.includes("cover")) {
                                 return uploadBannerImage(file.buffer);
                             } else {
-                                return uploadPostAttachment(file.buffer, fileType);
+                                return uploadPostAttachment(file.buffer, fileType, file.originalname);
                             }
                         });
-                        
+
                         const results = await Promise.all(uploadPromises);
-                        
+
                         // Update files with Cloudinary results
                         req.files[fieldName] = files.map((file, index) => ({
                             ...file,
@@ -185,7 +191,7 @@ export const uploadToCloudinary = {
                             publicId: results[index].public_id,
                         }));
                     }
-                    
+
                     next();
                 } catch (error) {
                     console.error("Cloudinary upload error:", error);

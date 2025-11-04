@@ -14,25 +14,25 @@ const conversationSchema = new mongoose.Schema(
       required: true,
       default: CONVERSATION_TYPES.DIRECT,
     },
-    
+
     // Tên conversation (bắt buộc với group/class, optional với direct)
     name: {
       type: String,
       trim: true,
     },
-    
+
     // Avatar cho group/class
     avatar: {
       type: String,
       default: "",
     },
-    
+
     // Mô tả (cho group/class)
     description: {
       type: String,
       maxLength: 500,
     },
-    
+
     // Participants - Danh sách thành viên
     participants: [{
       user: {
@@ -88,7 +88,7 @@ const conversationSchema = new mongoose.Schema(
         trim: true,
       },
     }],
-    
+
     // Last message (để hiển thị preview)
     lastMessage: {
       type: mongoose.Schema.Types.ObjectId,
@@ -97,13 +97,13 @@ const conversationSchema = new mongoose.Schema(
     lastMessageAt: {
       type: Date,
     },
-    
+
     // Liên kết với Class (nếu type = 'class')
     classId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Class",
     },
-    
+
     // Settings của conversation
     settings: {
       // Cho phép chia sẻ file
@@ -147,13 +147,13 @@ const conversationSchema = new mongoose.Schema(
         default: 0, // 0 = không auto delete
       },
     },
-    
+
     // Encryption (for future end-to-end encryption)
     isEncrypted: {
       type: Boolean,
       default: false,
     },
-    
+
     // Pinned messages
     pinnedMessages: [{
       message: {
@@ -169,7 +169,7 @@ const conversationSchema = new mongoose.Schema(
         default: Date.now,
       },
     }],
-    
+
     // Status
     isActive: {
       type: Boolean,
@@ -179,14 +179,14 @@ const conversationSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    
+
     // For direct chats - quick lookup
     // [userId1, userId2] sorted to ensure uniqueness
     directChatUsers: [{
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     }],
-    
+
     // Statistics
     stats: {
       totalMessages: { type: Number, default: 0 },
@@ -194,14 +194,14 @@ const conversationSchema = new mongoose.Schema(
       totalImages: { type: Number, default: 0 },
       totalVideos: { type: Number, default: 0 },
     },
-    
+
     // Created by (người tạo conversation)
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
   },
-  { 
+  {
     timestamps: true,
   }
 );
@@ -222,6 +222,14 @@ conversationSchema.index({ "participants.user": 1, "participants.status": 1 });
 // Index cho active conversations
 conversationSchema.index({ isActive: 1, lastMessageAt: -1 });
 
+// Compound index for user conversations query (optimized for getUserConversations)
+conversationSchema.index({
+  "participants.user": 1,
+  "participants.status": 1,
+  isActive: 1,
+  lastMessageAt: -1
+});
+
 // Text search
 conversationSchema.index({ name: "text", description: "text" });
 
@@ -229,29 +237,29 @@ conversationSchema.index({ name: "text", description: "text" });
 // VIRTUALS
 // ============================================
 
-conversationSchema.virtual('participantCount').get(function() {
+conversationSchema.virtual('participantCount').get(function () {
   return this.participants.filter(p => p.status === "active").length;
 });
 
-conversationSchema.virtual('activeParticipants').get(function() {
+conversationSchema.virtual('activeParticipants').get(function () {
   return this.participants.filter(p => p.status === "active");
 });
 
-conversationSchema.virtual('admins').get(function() {
-  return this.participants.filter(p => 
+conversationSchema.virtual('admins').get(function () {
+  return this.participants.filter(p =>
     p.role === "admin" && p.status === "active"
   );
 });
 
-conversationSchema.virtual('isDirect').get(function() {
+conversationSchema.virtual('isDirect').get(function () {
   return this.type === CONVERSATION_TYPES.DIRECT;
 });
 
-conversationSchema.virtual('isGroup').get(function() {
+conversationSchema.virtual('isGroup').get(function () {
   return this.type === CONVERSATION_TYPES.GROUP;
 });
 
-conversationSchema.virtual('isClass').get(function() {
+conversationSchema.virtual('isClass').get(function () {
   return this.type === CONVERSATION_TYPES.CLASS;
 });
 
@@ -262,19 +270,19 @@ conversationSchema.virtual('isClass').get(function() {
 /**
  * Add participant to conversation
  */
-conversationSchema.methods.addParticipant = async function(userId, addedBy, role = "member") {
+conversationSchema.methods.addParticipant = async function (userId, addedBy, role = "member") {
   // Check if already exists
-  const existingParticipant = this.participants.find(p => 
+  const existingParticipant = this.participants.find(p =>
     p.user.equals(userId) && p.status === "active"
   );
-  
+
   if (existingParticipant) {
     throw new Error("User is already a participant");
   }
-  
+
   // Check if user was previously a member
   const previousParticipant = this.participants.find(p => p.user.equals(userId));
-  
+
   if (previousParticipant) {
     // Reactivate
     previousParticipant.status = "active";
@@ -289,85 +297,85 @@ conversationSchema.methods.addParticipant = async function(userId, addedBy, role
       status: "active",
     });
   }
-  
+
   // Create system message
   await this.createSystemMessage(`${addedBy.fullName} added a new member`, "user_added", {
     addedUserId: userId,
     addedBy: addedBy._id,
   });
-  
+
   return await this.save();
 };
 
 /**
  * Remove participant from conversation
  */
-conversationSchema.methods.removeParticipant = async function(userId, removedBy) {
-  const participant = this.participants.find(p => 
+conversationSchema.methods.removeParticipant = async function (userId, removedBy) {
+  const participant = this.participants.find(p =>
     p.user.equals(userId) && p.status === "active"
   );
-  
+
   if (!participant) {
     throw new Error("User is not an active participant");
   }
-  
+
   participant.status = "removed";
   participant.leftAt = new Date();
-  
+
   // Create system message
   await this.createSystemMessage(`${removedBy.fullName} removed a member`, "user_removed", {
     removedUserId: userId,
     removedBy: removedBy._id,
   });
-  
+
   return await this.save();
 };
 
 /**
  * Leave conversation
  */
-conversationSchema.methods.leaveConversation = async function(userId) {
-  const participant = this.participants.find(p => 
+conversationSchema.methods.leaveConversation = async function (userId) {
+  const participant = this.participants.find(p =>
     p.user.equals(userId) && p.status === "active"
   );
-  
+
   if (!participant) {
     throw new Error("User is not an active participant");
   }
-  
+
   participant.status = "left";
   participant.leftAt = new Date();
-  
+
   // Get user for system message
   const User = mongoose.model("User");
   const user = await User.findById(userId);
-  
+
   // Create system message
   await this.createSystemMessage(`${user.fullName} left the conversation`, "user_left", {
     leftUserId: userId,
   });
-  
+
   return await this.save();
 };
 
 /**
  * Update participant role
  */
-conversationSchema.methods.updateParticipantRole = async function(userId, newRole, updatedBy) {
-  const participant = this.participants.find(p => 
+conversationSchema.methods.updateParticipantRole = async function (userId, newRole, updatedBy) {
+  const participant = this.participants.find(p =>
     p.user.equals(userId) && p.status === "active"
   );
-  
+
   if (!participant) {
     throw new Error("User is not an active participant");
   }
-  
+
   const oldRole = participant.role;
   participant.role = newRole;
-  
+
   // Create system message
   await this.createSystemMessage(
-    `${updatedBy.fullName} changed a member's role from ${oldRole} to ${newRole}`, 
+    `${updatedBy.fullName} changed a member's role from ${oldRole} to ${newRole}`,
     "role_changed",
     {
       userId,
@@ -376,15 +384,15 @@ conversationSchema.methods.updateParticipantRole = async function(userId, newRol
       updatedBy: updatedBy._id,
     }
   );
-  
+
   return await this.save();
 };
 
 /**
  * Check if user is participant
  */
-conversationSchema.methods.isParticipant = function(userId) {
-  return this.participants.some(p => 
+conversationSchema.methods.isParticipant = function (userId) {
+  return this.participants.some(p =>
     p.user.equals(userId) && p.status === "active"
   );
 };
@@ -392,8 +400,8 @@ conversationSchema.methods.isParticipant = function(userId) {
 /**
  * Check if user is admin
  */
-conversationSchema.methods.isAdmin = function(userId) {
-  const participant = this.participants.find(p => 
+conversationSchema.methods.isAdmin = function (userId) {
+  const participant = this.participants.find(p =>
     p.user.equals(userId) && p.status === "active"
   );
   return participant && participant.role === "admin";
@@ -402,7 +410,7 @@ conversationSchema.methods.isAdmin = function(userId) {
 /**
  * Check if user can post
  */
-conversationSchema.methods.canUserPost = function(userId) {
+conversationSchema.methods.canUserPost = function (userId) {
   if (!this.settings.onlyAdminsCanPost) return true;
   return this.isAdmin(userId);
 };
@@ -410,71 +418,71 @@ conversationSchema.methods.canUserPost = function(userId) {
 /**
  * Get unread count for user
  */
-conversationSchema.methods.getUnreadCount = async function(userId) {
-  const participant = this.participants.find(p => 
+conversationSchema.methods.getUnreadCount = async function (userId) {
+  const participant = this.participants.find(p =>
     p.user.equals(userId) && p.status === "active"
   );
-  
+
   if (!participant) return 0;
-  
+
   const Message = mongoose.model("Message");
-  
+
   const query = {
     conversation: this._id,
     sender: { $ne: userId },
   };
-  
-  if (participant.lastSeenMessage) {
-    query.createdAt = { $gt: participant.lastSeenAt || new Date(0) };
+
+  if (participant.lastSeenAt) {
+    query.createdAt = { $gt: participant.lastSeenAt };
   }
-  
+
   return await Message.countDocuments(query);
 };
 
 /**
  * Mark as read for user
  */
-conversationSchema.methods.markAsRead = async function(userId, messageId = null) {
-  const participant = this.participants.find(p => 
+conversationSchema.methods.markAsRead = async function (userId, messageId = null) {
+  const participant = this.participants.find(p =>
     p.user.equals(userId) && p.status === "active"
   );
-  
+
   if (!participant) {
     throw new Error("User is not a participant");
   }
-  
+
   if (messageId) {
     participant.lastSeenMessage = messageId;
   }
   participant.lastSeenAt = new Date();
-  
+
   return await this.save();
 };
 
 /**
  * Pin message
  */
-conversationSchema.methods.pinMessage = async function(messageId, userId) {
+conversationSchema.methods.pinMessage = async function (messageId, userId) {
   // Check if already pinned
   const alreadyPinned = this.pinnedMessages.some(pm => pm.message.equals(messageId));
-  
+
   if (alreadyPinned) {
     throw new Error("Message is already pinned");
   }
-  
+
   this.pinnedMessages.push({
     message: messageId,
     pinnedBy: userId,
     pinnedAt: new Date(),
   });
-  
+
   return await this.save();
 };
 
 /**
  * Unpin message
  */
-conversationSchema.methods.unpinMessage = async function(messageId) {
+conversationSchema.methods.unpinMessage = async function (messageId) {
   this.pinnedMessages = this.pinnedMessages.filter(pm => !pm.message.equals(messageId));
   return await this.save();
 };
@@ -482,7 +490,7 @@ conversationSchema.methods.unpinMessage = async function(messageId) {
 /**
  * Update last message
  */
-conversationSchema.methods.updateLastMessage = async function(messageId) {
+conversationSchema.methods.updateLastMessage = async function (messageId) {
   this.lastMessage = messageId;
   this.lastMessageAt = new Date();
   return await this.save();
@@ -491,9 +499,9 @@ conversationSchema.methods.updateLastMessage = async function(messageId) {
 /**
  * Create system message
  */
-conversationSchema.methods.createSystemMessage = async function(content, systemType, metadata = {}) {
+conversationSchema.methods.createSystemMessage = async function (content, systemType, metadata = {}) {
   const Message = mongoose.model("Message");
-  
+
   return await Message.create({
     conversation: this._id,
     type: "system",
@@ -506,7 +514,7 @@ conversationSchema.methods.createSystemMessage = async function(content, systemT
 /**
  * Archive conversation for user
  */
-conversationSchema.methods.archiveForUser = async function(userId) {
+conversationSchema.methods.archiveForUser = async function (userId) {
   const participant = this.participants.find(p => p.user.equals(userId));
   if (participant) {
     participant.isArchived = true;
@@ -517,18 +525,18 @@ conversationSchema.methods.archiveForUser = async function(userId) {
 /**
  * Mute conversation for user
  */
-conversationSchema.methods.muteForUser = async function(userId, duration = null) {
+conversationSchema.methods.muteForUser = async function (userId, duration = null) {
   const participant = this.participants.find(p => p.user.equals(userId));
-  
+
   if (participant) {
     participant.isMuted = true;
-    
+
     if (duration) {
       const mutedUntil = new Date();
       mutedUntil.setTime(mutedUntil.getTime() + duration);
       participant.mutedUntil = mutedUntil;
     }
-    
+
     await this.save();
   }
 };
@@ -536,9 +544,9 @@ conversationSchema.methods.muteForUser = async function(userId, duration = null)
 /**
  * Unmute conversation for user
  */
-conversationSchema.methods.unmuteForUser = async function(userId) {
+conversationSchema.methods.unmuteForUser = async function (userId) {
   const participant = this.participants.find(p => p.user.equals(userId));
-  
+
   if (participant) {
     participant.isMuted = false;
     participant.mutedUntil = null;
@@ -553,19 +561,19 @@ conversationSchema.methods.unmuteForUser = async function(userId) {
 /**
  * Find or create direct conversation between two users
  */
-conversationSchema.statics.findOrCreateDirectConversation = async function(user1Id, user2Id) {
+conversationSchema.statics.findOrCreateDirectConversation = async function (user1Id, user2Id) {
   // Sort user IDs to ensure consistency
   const sortedUsers = [user1Id, user2Id].sort();
-  
+
   // Try to find existing conversation
   let conversation = await this.findOne({
     type: CONVERSATION_TYPES.DIRECT,
     directChatUsers: { $all: sortedUsers },
     isActive: true,
   })
-  .populate("participants.user", "firstName lastName username profilePicture")
-  .populate("lastMessage");
-  
+    .populate("participants.user", "firstName lastName username profilePicture")
+    .populate("lastMessage");
+
   // Create if not exists
   if (!conversation) {
     conversation = await this.create({
@@ -577,38 +585,38 @@ conversationSchema.statics.findOrCreateDirectConversation = async function(user1
       ],
       createdBy: user1Id,
     });
-    
+
     conversation = await conversation.populate("participants.user", "firstName lastName username profilePicture");
   }
-  
+
   return conversation;
 };
 
 /**
  * Get user's conversations
  */
-conversationSchema.statics.getUserConversations = function(userId, options = {}) {
+conversationSchema.statics.getUserConversations = function (userId, options = {}) {
   const {
     type,
     limit = 50,
     skip = 0,
     includeArchived = false,
   } = options;
-  
+
   const query = {
     "participants.user": userId,
     "participants.status": "active",
     isActive: true,
   };
-  
+
   if (type) {
     query.type = type;
   }
-  
+
   if (!includeArchived) {
     query["participants.isArchived"] = { $ne: true };
   }
-  
+
   return this.find(query)
     .populate("participants.user", "firstName lastName username profilePicture role")
     .populate("lastMessage")
@@ -621,7 +629,7 @@ conversationSchema.statics.getUserConversations = function(userId, options = {})
 /**
  * Search conversations
  */
-conversationSchema.statics.searchConversations = function(userId, searchQuery) {
+conversationSchema.statics.searchConversations = function (userId, searchQuery) {
   return this.find({
     "participants.user": userId,
     "participants.status": "active",
@@ -631,33 +639,33 @@ conversationSchema.statics.searchConversations = function(userId, searchQuery) {
       { description: new RegExp(searchQuery, "i") },
     ],
   })
-  .populate("participants.user", "firstName lastName username profilePicture")
-  .populate("lastMessage")
-  .limit(20);
+    .populate("participants.user", "firstName lastName username profilePicture")
+    .populate("lastMessage")
+    .limit(20);
 };
 
 /**
  * Get active group conversations for user
  */
-conversationSchema.statics.getUserGroups = function(userId) {
+conversationSchema.statics.getUserGroups = function (userId) {
   return this.find({
     type: CONVERSATION_TYPES.GROUP,
     "participants.user": userId,
     "participants.status": "active",
     isActive: true,
   })
-  .populate("participants.user", "firstName lastName username profilePicture")
-  .populate("lastMessage")
-  .sort({ lastMessageAt: -1 });
+    .populate("participants.user", "firstName lastName username profilePicture")
+    .populate("lastMessage")
+    .sort({ lastMessageAt: -1 });
 };
 
 /**
  * Delete old archived conversations
  */
-conversationSchema.statics.cleanupOldArchived = async function(days = 90) {
+conversationSchema.statics.cleanupOldArchived = async function (days = 90) {
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - days);
-  
+
   return await this.deleteMany({
     isArchived: true,
     updatedAt: { $lt: cutoffDate },
@@ -669,13 +677,13 @@ conversationSchema.statics.cleanupOldArchived = async function(days = 90) {
 // ============================================
 
 // Auto-generate name for direct chats
-conversationSchema.pre("save", async function(next) {
+conversationSchema.pre("save", async function (next) {
   if (this.isNew && this.type === CONVERSATION_TYPES.DIRECT && !this.name) {
     const User = mongoose.model("User");
     const users = await User.find({
       _id: { $in: this.directChatUsers }
     });
-    
+
     if (users.length === 2) {
       this.name = users.map(u => u.fullName).join(" & ");
     }
@@ -684,7 +692,7 @@ conversationSchema.pre("save", async function(next) {
 });
 
 // Update stats on save
-conversationSchema.pre("save", function(next) {
+conversationSchema.pre("save", function (next) {
   // Update participant count would go here if needed
   next();
 });
@@ -696,4 +704,4 @@ conversationSchema.pre("save", function(next) {
 const Conversation = mongoose.model("Conversation", conversationSchema);
 
 // export default Conversation;
-export { Conversation,CONVERSATION_TYPES };
+export { Conversation, CONVERSATION_TYPES };

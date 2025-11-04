@@ -298,7 +298,7 @@ const postSchema = new mongoose.Schema(
       default: false,
     },
   },
-  { 
+  {
     timestamps: true,
   }
 );
@@ -316,19 +316,19 @@ postSchema.index({ "homeworkData.dueDate": 1 });
 postSchema.index({ "eventData.startDate": 1 });
 
 // Virtuals
-postSchema.virtual('likesCount').get(function() {
+postSchema.virtual('likesCount').get(function () {
   return this.likes.length;
 });
 
-postSchema.virtual('commentsCount').get(function() {
+postSchema.virtual('commentsCount').get(function () {
   return this.comments.length;
 });
 
-postSchema.virtual('sharesCount').get(function() {
+postSchema.virtual('sharesCount').get(function () {
   return this.shares.length;
 });
 
-postSchema.virtual('isExpired').get(function() {
+postSchema.virtual('isExpired').get(function () {
   if (this.postType === POST_TYPES.ANNOUNCEMENT && this.announcementData?.expiresAt) {
     return new Date() > this.announcementData.expiresAt;
   }
@@ -339,11 +339,11 @@ postSchema.virtual('isExpired').get(function() {
 });
 
 // Middleware: Validate quyền đăng bài
-postSchema.pre("save", async function(next) {
+postSchema.pre("save", async function (next) {
   try {
     const User = mongoose.model("User");
     const user = await User.findById(this.user);
-    
+
     if (!user) {
       throw new Error("User not found");
     }
@@ -360,11 +360,11 @@ postSchema.pre("save", async function(next) {
       if (user.role !== "teacher") {
         throw new Error("Only teachers can create homework");
       }
-      
+
       if (!this.homeworkData?.dueDate) {
         throw new Error("Homework must have a due date");
       }
-      
+
       if (!this.targetClass && !this.targetClasses?.length) {
         throw new Error("Homework must be assigned to at least one class");
       }
@@ -393,7 +393,7 @@ postSchema.pre("save", async function(next) {
 });
 
 // Middleware: Auto-publish scheduled posts
-postSchema.pre("save", function(next) {
+postSchema.pre("save", function (next) {
   if (this.scheduledFor && new Date() >= this.scheduledFor && this.status === POST_STATUS.DRAFT) {
     this.status = POST_STATUS.PUBLISHED;
   }
@@ -401,30 +401,40 @@ postSchema.pre("save", function(next) {
 });
 
 // Methods
-postSchema.methods.isLikedBy = function(userId) {
+postSchema.methods.isLikedBy = function (userId) {
   return this.likes.some(id => id.toString() === userId.toString());
 };
 
-postSchema.methods.toggleLike = async function(userId) {
+postSchema.methods.toggleLike = async function (userId) {
   if (!this.allowLikes) {
     throw new Error("Likes are disabled for this post");
   }
-  
+
+  if (!userId) {
+    throw new Error("User ID is required to like post");
+  }
+
   const index = this.likes.findIndex(id => id.toString() === userId.toString());
-  
+
+  let wasLiked = false;
   if (index > -1) {
     this.likes.splice(index, 1);
   } else {
     this.likes.push(userId);
+    wasLiked = true;
   }
-  
-  return await this.save();
+
+  // Update likesCount
+  this.likesCount = this.likes.length;
+
+  await this.save();
+  return wasLiked; // Return true if liked, false if unliked
 };
 
-postSchema.methods.addView = async function(userId) {
+postSchema.methods.addView = async function (userId) {
   // Avoid duplicate views from same user
   const alreadyViewed = this.views.some(v => v.user.equals(userId));
-  
+
   if (!alreadyViewed) {
     this.views.push({ user: userId });
     this.viewsCount += 1;
@@ -432,102 +442,102 @@ postSchema.methods.addView = async function(userId) {
   }
 };
 
-postSchema.methods.share = async function(userId) {
+postSchema.methods.share = async function (userId) {
   if (!this.allowSharing) {
     throw new Error("Sharing is disabled for this post");
   }
-  
+
   this.shares.push({ user: userId });
   return await this.save();
 };
 
-postSchema.methods.submitHomework = async function(studentId, submissionData) {
+postSchema.methods.submitHomework = async function (studentId, submissionData) {
   if (this.postType !== POST_TYPES.HOMEWORK) {
     throw new Error("This is not a homework post");
   }
-  
+
   const dueDate = this.homeworkData.dueDate;
   const isLate = new Date() > dueDate;
-  
+
   if (isLate && !this.homeworkData.allowLateSubmission) {
     throw new Error("Late submissions are not allowed");
   }
-  
+
   // Check if already submitted
   const existingSubmission = this.homeworkData.submissions.find(
     s => s.student.equals(studentId)
   );
-  
+
   if (existingSubmission) {
     throw new Error("Already submitted. Contact teacher to resubmit.");
   }
-  
+
   this.homeworkData.submissions.push({
     student: studentId,
     submittedAt: new Date(),
     ...submissionData,
     isLate,
   });
-  
+
   return await this.save();
 };
 
-postSchema.methods.gradeSubmission = async function(studentId, score, feedback, graderId) {
+postSchema.methods.gradeSubmission = async function (studentId, score, feedback, graderId) {
   const submission = this.homeworkData.submissions.find(
     s => s.student.equals(studentId)
   );
-  
+
   if (!submission) {
     throw new Error("Submission not found");
   }
-  
+
   // Apply late penalty
   if (submission.isLate && this.homeworkData.lateSubmissionPenalty) {
     score = score * (1 - this.homeworkData.lateSubmissionPenalty / 100);
   }
-  
+
   submission.score = Math.min(score, this.homeworkData.maxScore);
   submission.feedback = feedback;
   submission.gradedAt = new Date();
   submission.gradedBy = graderId;
-  
+
   return await this.save();
 };
 
-postSchema.methods.votePoll = async function(userId, optionIndex) {
+postSchema.methods.votePoll = async function (userId, optionIndex) {
   if (this.postType !== POST_TYPES.POLL) {
     throw new Error("This is not a poll");
   }
-  
+
   if (this.isExpired) {
     throw new Error("This poll has expired");
   }
-  
+
   const option = this.pollData.options[optionIndex];
   if (!option) {
     throw new Error("Invalid option");
   }
-  
+
   // Check if already voted
   const alreadyVoted = this.pollData.options.some(
     opt => opt.votes.some(v => v.equals(userId))
   );
-  
+
   if (alreadyVoted && !this.pollData.allowMultipleVotes) {
     throw new Error("You have already voted");
   }
-  
+
   option.votes.push(userId);
   return await this.save();
 };
 
-postSchema.methods.respondToEvent = async function(userId, status) {
+postSchema.methods.respondToEvent = async function (userId, status) {
   if (this.postType !== POST_TYPES.EVENT) {
     throw new Error("This is not an event");
   }
-  
+
   const attendee = this.eventData.attendees.find(a => a.user.equals(userId));
-  
+
   if (attendee) {
     attendee.status = status;
     attendee.respondedAt = new Date();
@@ -537,21 +547,21 @@ postSchema.methods.respondToEvent = async function(userId, status) {
     if (this.eventData.maxAttendees && goingCount >= this.eventData.maxAttendees && status === "going") {
       throw new Error("Event is full");
     }
-    
+
     this.eventData.attendees.push({
       user: userId,
       status,
       respondedAt: new Date(),
     });
   }
-  
+
   return await this.save();
 };
 
-postSchema.methods.markAsRead = async function(userId) {
+postSchema.methods.markAsRead = async function (userId) {
   if (this.postType === POST_TYPES.ANNOUNCEMENT) {
     const alreadyRead = this.announcementData.readBy.some(r => r.user.equals(userId));
-    
+
     if (!alreadyRead) {
       this.announcementData.readBy.push({ user: userId });
       await this.save();
@@ -559,20 +569,20 @@ postSchema.methods.markAsRead = async function(userId) {
   }
 };
 
-postSchema.methods.acknowledge = async function(userId) {
+postSchema.methods.acknowledge = async function (userId) {
   if (this.postType !== POST_TYPES.ANNOUNCEMENT || !this.announcementData.requiresAcknowledgment) {
     throw new Error("This announcement does not require acknowledgment");
   }
-  
+
   const alreadyAcknowledged = this.announcementData.acknowledgedBy.some(a => a.user.equals(userId));
-  
+
   if (!alreadyAcknowledged) {
     this.announcementData.acknowledgedBy.push({ user: userId });
     await this.save();
   }
 };
 
-postSchema.methods.report = async function(userId, reason) {
+postSchema.methods.report = async function (userId, reason) {
   this.reports.push({
     reportedBy: userId,
     reason,
@@ -581,46 +591,46 @@ postSchema.methods.report = async function(userId, reason) {
 };
 
 // Static methods
-postSchema.statics.findByType = function(postType, options = {}) {
-  return this.find({ 
+postSchema.statics.findByType = function (postType, options = {}) {
+  return this.find({
     postType,
     status: POST_STATUS.PUBLISHED,
     isActive: true,
-    ...options 
+    ...options
   }).sort({ isPinned: -1, createdAt: -1 });
 };
 
-postSchema.statics.findByClass = function(classId) {
-  return this.find({ 
+postSchema.statics.findByClass = function (classId) {
+  return this.find({
     $or: [
       { targetClass: classId },
       { targetClasses: classId }
     ],
     status: POST_STATUS.PUBLISHED,
-    isActive: true 
+    isActive: true
   }).sort({ isPinned: -1, createdAt: -1 });
 };
 
-postSchema.statics.findVisiblePosts = function(user, options = {}) {
-  const query = { 
+postSchema.statics.findVisiblePosts = function (user, options = {}) {
+  const query = {
     status: POST_STATUS.PUBLISHED,
     isActive: true,
-    ...options 
+    ...options
   };
-  
+
   // Logic xem bài dựa trên role
   if (user.role === "student") {
     query.$or = [
       { visibility: VISIBILITY_TYPES.PUBLIC },
       { visibility: VISIBILITY_TYPES.STUDENTS_ONLY },
-      { 
+      {
         visibility: VISIBILITY_TYPES.CLASS_SPECIFIC,
         $or: [
           { targetClass: user.roleSpecificData?.classId },
           { targetClasses: user.roleSpecificData?.classId }
         ]
       },
-      { 
+      {
         visibility: VISIBILITY_TYPES.FOLLOWERS_ONLY,
         user: { $in: user.following }
       },
@@ -630,7 +640,7 @@ postSchema.statics.findVisiblePosts = function(user, options = {}) {
     query.$or = [
       { visibility: VISIBILITY_TYPES.PUBLIC },
       { visibility: VISIBILITY_TYPES.TEACHERS_ONLY },
-      { 
+      {
         visibility: VISIBILITY_TYPES.FOLLOWERS_ONLY,
         user: { $in: user.following }
       },
@@ -639,23 +649,23 @@ postSchema.statics.findVisiblePosts = function(user, options = {}) {
   } else {
     // Staff xem được tất cả
   }
-  
+
   return this.find(query)
     .sort({ isPinned: -1, createdAt: -1 })
     .populate('user', 'firstName lastName username profilePicture role');
 };
 
-postSchema.statics.findScheduledPosts = function() {
+postSchema.statics.findScheduledPosts = function () {
   return this.find({
     status: POST_STATUS.DRAFT,
     scheduledFor: { $lte: new Date() },
   });
 };
 
-postSchema.statics.findExpiringSoon = function(hours = 24) {
+postSchema.statics.findExpiringSoon = function (hours = 24) {
   const futureDate = new Date();
   futureDate.setHours(futureDate.getHours() + hours);
-  
+
   return this.find({
     postType: POST_TYPES.ANNOUNCEMENT,
     "announcementData.expiresAt": {
@@ -666,10 +676,10 @@ postSchema.statics.findExpiringSoon = function(hours = 24) {
   });
 };
 
-postSchema.statics.findHomeworkDueSoon = function(hours = 24) {
+postSchema.statics.findHomeworkDueSoon = function (hours = 24) {
   const futureDate = new Date();
   futureDate.setHours(futureDate.getHours() + hours);
-  
+
   return this.find({
     postType: POST_TYPES.HOMEWORK,
     "homeworkData.dueDate": {
@@ -680,10 +690,10 @@ postSchema.statics.findHomeworkDueSoon = function(hours = 24) {
   });
 };
 
-postSchema.statics.findUpcomingEvents = function(days = 7) {
+postSchema.statics.findUpcomingEvents = function (days = 7) {
   const futureDate = new Date();
   futureDate.setDate(futureDate.getDate() + days);
-  
+
   return this.find({
     postType: POST_TYPES.EVENT,
     "eventData.startDate": {
@@ -694,10 +704,10 @@ postSchema.statics.findUpcomingEvents = function(days = 7) {
   }).sort({ "eventData.startDate": 1 });
 };
 
-postSchema.statics.findTrending = function(days = 7) {
+postSchema.statics.findTrending = function (days = 7) {
   const pastDate = new Date();
   pastDate.setDate(pastDate.getDate() - days);
-  
+
   return this.aggregate([
     {
       $match: {
@@ -723,9 +733,9 @@ postSchema.statics.findTrending = function(days = 7) {
   ]);
 };
 
-postSchema.statics.searchPosts = function(searchTerm, user) {
+postSchema.statics.searchPosts = function (searchTerm, user) {
   const searchRegex = new RegExp(searchTerm, "i");
-  
+
   return this.findVisiblePosts(user, {
     $or: [
       { content: searchRegex },
@@ -736,11 +746,11 @@ postSchema.statics.searchPosts = function(searchTerm, user) {
   });
 };
 
-postSchema.statics.getAnalytics = async function(postId) {
+postSchema.statics.getAnalytics = async function (postId) {
   const post = await this.findById(postId);
-  
+
   if (!post) return null;
-  
+
   return {
     postId: post._id,
     type: post.postType,
@@ -748,7 +758,7 @@ postSchema.statics.getAnalytics = async function(postId) {
     commentsCount: post.commentsCount,
     sharesCount: post.sharesCount,
     viewsCount: post.viewsCount,
-    engagementRate: post.viewsCount > 0 
+    engagementRate: post.viewsCount > 0
       ? ((post.likesCount + post.commentsCount + post.sharesCount) / post.viewsCount * 100).toFixed(2)
       : 0,
     // Homework specific

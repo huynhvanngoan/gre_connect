@@ -1,5 +1,5 @@
 import { useSocialAuth } from "@/hooks/useSocialAuth";
-import { ActivityIndicator, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Image, Text, TouchableOpacity, View } from "react-native";
 
 export default function Index() {
   const { handleSocialAuth, isLoading } = useSocialAuth();

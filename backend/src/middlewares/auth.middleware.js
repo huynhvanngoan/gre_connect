@@ -38,6 +38,9 @@ const invalidateUserCache = (clerkId) => {
     userCache.delete(clerkId);
 };
 
+// Export for use in controllers
+export { invalidateUserCache };
+
 /**
  * Require authentication - verify Clerk token
  */

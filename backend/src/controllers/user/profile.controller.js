@@ -8,10 +8,16 @@ import Post from "../../models/post.model.js";
  * @access  Private
  */
 export const getCurrentUser = asyncHandler(async (req, res) => {
+    if (!req.user || !req.user._id) {
+        res.status(401);
+        throw new Error("User not authenticated");
+    }
+
     const user = await User.findById(req.user._id)
         .populate("roleSpecificData.classId", "name code")
         .populate("roleSpecificData.classesTeaching", "name code")
-        .select("-__v");
+        .select("-__v")
+        .lean();
 
     if (!user) {
         res.status(404);

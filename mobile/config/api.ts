@@ -9,7 +9,7 @@ const getApiUrl = () => {
   // Fallback defaults
   return __DEV__ 
     ? 'http://192.168.100.174:5001/api/v1'  // Development - use your computer's IP
-    // ? 'https://gre-connect-omega.vercel.app/api/v1'  // Development - use your computer's IP
+   
     : 'https://gre-connect-omega.vercel.app/api/v1'; // Production - Vercel
 };
 

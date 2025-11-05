@@ -24,6 +24,10 @@ class ApiService {
     this.authToken = token;
   }
 
+  clearAuthToken() {
+    this.authToken = null;
+  }
+
   private getAuthToken(): string | null {
     return this.authToken;
   }
@@ -641,6 +645,27 @@ class ApiService {
     }
     
     return { ...response, data: [] };
+  }
+
+  // Logout - clear token and notify backend
+  async logout(): Promise<ApiResponse<void>> {
+    try {
+      // Call backend logout to clear cache
+      await this.post<void>(API_ENDPOINTS.auth.logout);
+      
+      // Clear local token
+      this.clearAuthToken();
+      
+      return { success: true, message: 'Logged out successfully' };
+    } catch (error: any) {
+      // Even if backend call fails, clear local token
+      this.clearAuthToken();
+      return { 
+        success: false, 
+        error: error.message || 'Logout failed',
+        message: 'Local token cleared' 
+      };
+    }
   }
 }
 

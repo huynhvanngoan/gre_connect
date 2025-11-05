@@ -2,6 +2,8 @@ import asyncHandler from "express-async-handler";
 import { clerkClient } from "@clerk/clerk-sdk-node";
 import User from "../models/user.model.js";
 import { ROLES } from "../utils/constants.js";
+import { invalidateUserCache } from "../middlewares/auth.middleware.js";
+import { logger } from "../utils/logger.js";
 
 /**
  * @desc    Sync user from Clerk to MongoDB
@@ -35,7 +37,12 @@ export const syncUser = asyncHandler(async (req, res) => {
         const clerkUserData = await clerkClient.users.getUser(clerkUser.sub);
 
         // Extract user data
-        const email = clerkUserData.emailAddresses[0]?.emailAddress;
+        const email = clerkUserData.emailAddresses?.[0]?.emailAddress;
+        if (!email) {
+            res.status(400);
+            throw new Error("User email is required but not found in Clerk");
+        }
+
         const firstName = clerkUserData.firstName || "";
         const lastName = clerkUserData.lastName || "";
         const profilePicture = clerkUserData.imageUrl || "";
@@ -173,16 +180,30 @@ export const checkAuth = asyncHandler(async (req, res) => {
  * @route   POST /api/auth/logout
  * @access  Private
  * 
- * Note: Actual logout happens on Clerk side (frontend)
- * This endpoint is mainly for logging purposes
+ * Clears user cache and invalidates session
  */
 export const logout = asyncHandler(async (req, res) => {
-    // You can add any cleanup logic here
-    // For example, invalidate refresh tokens, clear sessions, etc.
+    const user = req.user;
+    const clerkId = req.clerkUser?.sub || user?.clerkId;
+
+    // Invalidate user cache
+    if (clerkId) {
+        invalidateUserCache(clerkId);
+        logger.info(`User cache invalidated for logout`, { clerkId, userId: user?._id });
+    }
+
+    // You can add additional cleanup logic here:
+    // - Invalidate refresh tokens
+    // - Clear active sessions
+    // - Log logout event
+    // - Disconnect socket connections
 
     res.status(200).json({
         success: true,
         message: "Logged out successfully",
+        data: {
+            cacheCleared: !!clerkId,
+        },
     });
 });
 

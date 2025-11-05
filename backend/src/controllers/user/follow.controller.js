@@ -1,10 +1,5 @@
 import asyncHandler from "express-async-handler";
 import User from "../../models/user.model.js";
-import { findOr404 } from "../../utils/helpers.js";
-import { successResponse, errorResponse } from "../../utils/response.js";
-import { HTTP_STATUS } from "../../utils/constants.js";
-import { validateFollowAction } from "../../services/user.service.js";
-import { createPaginatedResponse } from "../../utils/helpers.js";
 
 /**
  * @desc    Follow a user
@@ -13,19 +8,45 @@ import { createPaginatedResponse } from "../../utils/helpers.js";
  */
 export const followUser = asyncHandler(async (req, res) => {
     const { userId } = req.params;
-
-    const { currentUser, targetUser } = await validateFollowAction(req.user._id, userId);
-
+    const currentUser = await User.findById(req.user._id);
+    
+    if (!currentUser) {
+        res.status(404);
+        throw new Error("Current user not found");
+    }
+    
+    if (currentUser._id.toString() === userId) {
+        res.status(400);
+        throw new Error("You cannot follow yourself");
+    }
+    
+    const userToFollow = await User.findById(userId);
+    
+    if (!userToFollow) {
+        res.status(404);
+        throw new Error("User not found");
+    }
+    
+    if (!userToFollow.isActive) {
+        res.status(400);
+        throw new Error("Cannot follow inactive user");
+    }
+    
     // Check if already following
     if (currentUser.following.includes(userId)) {
-        return errorResponse(res, HTTP_STATUS.BAD_REQUEST, "You are already following this user");
+        res.status(400);
+        throw new Error("You are already following this user");
     }
-
+    
     await currentUser.follow(userId);
-
-    // TODO: Create notification for the followed user
-
-    successResponse(res, HTTP_STATUS.OK, "User followed successfully", null);
+    
+    // Create notification for the followed user
+    // TODO: Implement notification creation
+    
+    res.status(200).json({
+        success: true,
+        message: "User followed successfully",
+    });
 });
 
 /**
@@ -35,15 +56,24 @@ export const followUser = asyncHandler(async (req, res) => {
  */
 export const unfollowUser = asyncHandler(async (req, res) => {
     const { userId } = req.params;
-    const currentUser = await findOr404(User, req.user._id, "Current user not found");
-
-    if (!currentUser.following.includes(userId)) {
-        return errorResponse(res, HTTP_STATUS.BAD_REQUEST, "You are not following this user");
+    const currentUser = await User.findById(req.user._id);
+    
+    if (!currentUser) {
+        res.status(404);
+        throw new Error("Current user not found");
     }
-
+    
+    if (!currentUser.following.includes(userId)) {
+        res.status(400);
+        throw new Error("You are not following this user");
+    }
+    
     await currentUser.unfollow(userId);
-
-    successResponse(res, HTTP_STATUS.OK, "User unfollowed successfully", null);
+    
+    res.status(200).json({
+        success: true,
+        message: "User unfollowed successfully",
+    });
 });
 
 /**
@@ -54,27 +84,33 @@ export const unfollowUser = asyncHandler(async (req, res) => {
 export const getFollowers = asyncHandler(async (req, res) => {
     const { userId } = req.params;
     const { limit = 20, page = 1 } = req.query;
-
-    const user = await findOr404(User, userId, "User not found");
-
+    
+    const user = await User.findById(userId);
+    
+    if (!user) {
+        res.status(404);
+        throw new Error("User not found");
+    }
+    
     const skip = (page - 1) * limit;
-
+    
     const followers = await User.find({
         _id: { $in: user.followers }
     })
-        .select("firstName lastName username profilePicture bio role")
-        .limit(parseInt(limit))
-        .skip(skip);
-
-    return createPaginatedResponse(
-        res,
-        HTTP_STATUS.OK,
-        "Followers retrieved successfully",
-        followers,
-        user.followers.length,
-        page,
-        limit
-    );
+    .select("firstName lastName username profilePicture bio role")
+    .limit(parseInt(limit))
+    .skip(skip);
+    
+    res.status(200).json({
+        success: true,
+        data: followers,
+        pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total: user.followers.length,
+            pages: Math.ceil(user.followers.length / limit),
+        },
+    });
 });
 
 /**
@@ -85,27 +121,33 @@ export const getFollowers = asyncHandler(async (req, res) => {
 export const getFollowing = asyncHandler(async (req, res) => {
     const { userId } = req.params;
     const { limit = 20, page = 1 } = req.query;
-
-    const user = await findOr404(User, userId, "User not found");
-
+    
+    const user = await User.findById(userId);
+    
+    if (!user) {
+        res.status(404);
+        throw new Error("User not found");
+    }
+    
     const skip = (page - 1) * limit;
-
+    
     const following = await User.find({
         _id: { $in: user.following }
     })
-        .select("firstName lastName username profilePicture bio role")
-        .limit(parseInt(limit))
-        .skip(skip);
-
-    return createPaginatedResponse(
-        res,
-        HTTP_STATUS.OK,
-        "Following retrieved successfully",
-        following,
-        user.following.length,
-        page,
-        limit
-    );
+    .select("firstName lastName username profilePicture bio role")
+    .limit(parseInt(limit))
+    .skip(skip);
+    
+    res.status(200).json({
+        success: true,
+        data: following,
+        pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total: user.following.length,
+            pages: Math.ceil(user.following.length / limit),
+        },
+    });
 });
 
 /**
@@ -115,14 +157,17 @@ export const getFollowing = asyncHandler(async (req, res) => {
  */
 export const checkFollowStatus = asyncHandler(async (req, res) => {
     const { userId } = req.params;
-    const currentUser = await findOr404(User, req.user._id, "Current user not found");
-
+    const currentUser = await User.findById(req.user._id);
+    
     const isFollowing = currentUser.following.some(id => id.toString() === userId);
     const isFollower = currentUser.followers.some(id => id.toString() === userId);
-
-    successResponse(res, HTTP_STATUS.OK, "Follow status retrieved successfully", {
-        isFollowing,
-        isFollower,
+    
+    res.status(200).json({
+        success: true,
+        data: {
+            isFollowing,
+            isFollower,
+        },
     });
 });
 
@@ -133,23 +178,27 @@ export const checkFollowStatus = asyncHandler(async (req, res) => {
  */
 export const removeFollower = asyncHandler(async (req, res) => {
     const { userId } = req.params;
-    const currentUser = await findOr404(User, req.user._id, "Current user not found");
-
+    const currentUser = await User.findById(req.user._id);
+    
     if (!currentUser.followers.includes(userId)) {
-        return errorResponse(res, HTTP_STATUS.BAD_REQUEST, "This user is not following you");
+        res.status(400);
+        throw new Error("This user is not following you");
     }
-
+    
     // Remove from current user's followers
     currentUser.followers = currentUser.followers.filter(
         id => id.toString() !== userId
     );
     await currentUser.save();
-
+    
     // Remove current user from that user's following
     await User.findByIdAndUpdate(userId, {
         $pull: { following: currentUser._id }
     });
-
-    successResponse(res, HTTP_STATUS.OK, "Follower removed successfully", null);
+    
+    res.status(200).json({
+        success: true,
+        message: "Follower removed successfully",
+    });
 });
 

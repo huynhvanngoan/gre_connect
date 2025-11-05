@@ -1,10 +1,10 @@
 import asyncHandler from "express-async-handler";
 import { Comment } from "../../models/comment.model.js";
 import Post from "../../models/post.model.js";
-import { findOr404 } from "../../utils/helpers.js";
-import { successResponse, errorResponse } from "../../utils/response.js";
-import { HTTP_STATUS } from "../../utils/constants.js";
-import { createPaginatedResponse } from "../../utils/helpers.js";
+import { Notification } from "../../models/notification.model.js";
+import { successResponse } from "../../utils/response.js";
+import { HTTP_STATUS, NOTIFICATION_TYPES } from "../../utils/constants.js";
+import { getIO } from "../../config/socket.js";
 
 /**
  * @desc    Create a new comment on a post
@@ -16,11 +16,18 @@ export const createComment = asyncHandler(async (req, res) => {
     const { content, commentType, parentComment, mentions } = req.body;
     const userId = req.user._id;
 
-    const post = await findOr404(Post, postId, "Post not found");
+    // Check if post exists
+    const post = await Post.findById(postId);
+
+    if (!post) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Post not found");
+    }
 
     // Check if comments are allowed
     if (!post.allowComments) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "Comments are disabled for this post");
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("Comments are disabled for this post");
     }
 
     // Prepare comment data
@@ -58,8 +65,6 @@ export const createComment = asyncHandler(async (req, res) => {
 
             // Notify parent comment author
             if (!parentCommentDoc.user.equals(userId)) {
-                const { Notification } = await import("../../models/notification.model.js");
-                const { NOTIFICATION_TYPES } = await import("../../utils/constants.js");
                 await Notification.createNotification({
                     recipientId: parentCommentDoc.user,
                     senderId: userId,
@@ -74,8 +79,6 @@ export const createComment = asyncHandler(async (req, res) => {
     } else {
         // Notify post author
         if (!post.user.equals(userId)) {
-            const { Notification } = await import("../../models/notification.model.js");
-            const { NOTIFICATION_TYPES } = await import("../../utils/constants.js");
             await Notification.createNotification({
                 recipientId: post.user,
                 senderId: userId,
@@ -90,33 +93,22 @@ export const createComment = asyncHandler(async (req, res) => {
 
     // Notify mentioned users
     if (mentions && mentions.length > 0) {
-        const { Notification } = await import("../../models/notification.model.js");
-        const { NOTIFICATION_TYPES } = await import("../../utils/constants.js");
-        const { getIO } = await import("../../config/socket.js");
-        const io = getIO();
-
         for (const mentionedUserId of mentions) {
-            if (mentionedUserId !== userId.toString()) {
+            if (!mentionedUserId.equals(userId)) {
                 await Notification.createNotification({
                     recipientId: mentionedUserId,
                     senderId: userId,
-                    type: NOTIFICATION_TYPES.MENTION,
-                    title: "You were mentioned",
+                    type: NOTIFICATION_TYPES.COMMENT_MENTION,
+                    title: "Mentioned in Comment",
                     message: `${req.user.fullName} mentioned you in a comment`,
                     actionUrl: `/posts/${postId}`,
                     commentId: comment._id,
-                });
-
-                io.to(mentionedUserId).emit("notification", {
-                    type: NOTIFICATION_TYPES.MENTION,
-                    message: `${req.user.fullName} mentioned you`,
                 });
             }
         }
     }
 
     // Emit socket event
-    const { getIO } = await import("../../config/socket.js");
     const io = getIO();
     io.to(`post-${postId}`).emit("new-comment", comment);
 
@@ -124,38 +116,75 @@ export const createComment = asyncHandler(async (req, res) => {
 });
 
 /**
- * @desc    Get comments for a post
+ * @desc    Get all comments for a post
  * @route   GET /api/comments/:postId
  * @access  Private
  */
 export const getComments = asyncHandler(async (req, res) => {
     const { postId } = req.params;
-    const { page = 1, limit = 20, sort = "newest" } = req.query;
-    const userId = req.user._id;
-
-    const post = await findOr404(Post, postId, "Post not found");
+    const {
+        limit = 20,
+        page = 1,
+        sortBy = "createdAt",
+        order = "desc",
+    } = req.query;
 
     const skip = (page - 1) * limit;
-    const sortOption = sort === "oldest" ? { createdAt: 1 } : { createdAt: -1 };
 
-    const comments = await Comment.find({ post: postId, parentComment: null, isActive: true })
+    // Check if post exists
+    const post = await Post.findById(postId);
+
+    if (!post) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Post not found");
+    }
+
+    // Get top-level comments (no parent)
+    const comments = await Comment.find({
+        post: postId,
+        parentComment: null,
+        isActive: true,
+        isHidden: false,
+    })
+        .sort({ [sortBy]: order === "desc" ? -1 : 1 })
+        .limit(parseInt(limit))
+        .skip(skip)
         .populate("user", "firstName lastName username profilePicture role")
         .populate({
             path: "replies",
+            options: { limit: 3, sort: { createdAt: 1 } },
             populate: {
                 path: "user",
-                select: "firstName lastName username profilePicture role"
+                select: "firstName lastName username profilePicture role",
             },
-            options: { sort: { createdAt: 1 } }
         })
-        .sort(sortOption)
-        .limit(parseInt(limit))
-        .skip(skip)
         .lean();
 
-    const total = await Comment.countDocuments({ post: postId, parentComment: null, isActive: true });
+    // Get total count
+    const total = await Comment.countDocuments({
+        post: postId,
+        parentComment: null,
+        isActive: true,
+        isHidden: false,
+    });
 
-    createPaginatedResponse(res, HTTP_STATUS.OK, "Comments retrieved successfully", comments, total, page, limit);
+    // Add virtual fields
+    const commentsWithVirtuals = comments.map(comment => ({
+        ...comment,
+        likesCount: comment.likes?.length || 0,
+        repliesCount: comment.replies?.length || 0,
+        isLiked: comment.likes?.some(id => id.toString() === req.user._id.toString()) || false,
+    }));
+
+    successResponse(res, HTTP_STATUS.OK, "Comments retrieved successfully", {
+        comments: commentsWithVirtuals,
+        pagination: {
+            total,
+            page: parseInt(page),
+            limit: parseInt(limit),
+            pages: Math.ceil(total / limit),
+        },
+    });
 });
 
 /**
@@ -172,45 +201,56 @@ export const getCommentById = asyncHandler(async (req, res) => {
             path: "replies",
             populate: {
                 path: "user",
-                select: "firstName lastName username profilePicture role"
-            }
+                select: "firstName lastName username profilePicture role",
+            },
         })
-        .populate("parentComment", "content user");
+        .populate("mentions", "firstName lastName username profilePicture");
 
     if (!comment) {
-        return errorResponse(res, HTTP_STATUS.NOT_FOUND, "Comment not found");
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Comment not found");
     }
 
-    successResponse(res, HTTP_STATUS.OK, "Comment retrieved successfully", { comment });
+    if (!comment.isActive || comment.isHidden) {
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("Comment is not available");
+    }
+
+    // Convert to object and add virtual fields
+    const commentObject = comment.toObject({ virtuals: true });
+    commentObject.isLiked = comment.likes.some(id => id.toString() === req.user._id.toString());
+
+    successResponse(res, HTTP_STATUS.OK, "Comment retrieved successfully", { comment: commentObject });
 });
 
 /**
- * @desc    Get replies to a comment
+ * @desc    Get all replies for a comment
  * @route   GET /api/comments/:commentId/replies
  * @access  Private
  */
 export const getReplies = asyncHandler(async (req, res) => {
     const { commentId } = req.params;
-    const { page = 1, limit = 20 } = req.query;
+    const { limit = 20 } = req.query;
 
-    const parentComment = await findOr404(Comment, commentId, "Comment not found");
-
-    const skip = (page - 1) * limit;
-
-    const replies = await Comment.find({ parentComment: commentId, isActive: true })
-        .populate("user", "firstName lastName username profilePicture role")
-        .sort({ createdAt: 1 })
+    const replies = await Comment.findReplies(commentId)
         .limit(parseInt(limit))
-        .skip(skip)
         .lean();
 
-    const total = await Comment.countDocuments({ parentComment: commentId, isActive: true });
+    // Add virtual fields
+    const repliesWithVirtuals = replies.map(reply => ({
+        ...reply,
+        likesCount: reply.likes?.length || 0,
+        isLiked: reply.likes?.some(id => id.toString() === req.user._id.toString()) || false,
+    }));
 
-    createPaginatedResponse(res, HTTP_STATUS.OK, "Replies retrieved successfully", replies, total, page, limit);
+    successResponse(res, HTTP_STATUS.OK, "Replies retrieved successfully", {
+        replies: repliesWithVirtuals,
+        count: replies.length,
+    });
 });
 
 /**
- * @desc    Update a comment
+ * @desc    Update comment
  * @route   PUT /api/comments/:commentId
  * @access  Private
  */
@@ -219,30 +259,29 @@ export const updateComment = asyncHandler(async (req, res) => {
     const { content } = req.body;
     const userId = req.user._id;
 
-    const comment = await findOr404(Comment, commentId, "Comment not found");
+    const comment = await Comment.findById(commentId);
 
-    // Check if user owns the comment
-    if (!comment.user.equals(userId) && req.user.role !== "admin" && req.user.role !== "staff") {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You can only edit your own comments");
+    if (!comment) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Comment not found");
     }
 
-    // Update comment
-    comment.content = content;
-    comment.isEdited = true;
-    await comment.save();
+    // Check ownership
+    if (!comment.user.equals(userId)) {
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You can only edit your own comments");
+    }
+
+    // Update with history
+    await comment.updateContent(content);
 
     await comment.populate("user", "firstName lastName username profilePicture role");
-
-    // Emit socket event
-    const { getIO } = await import("../../config/socket.js");
-    const io = getIO();
-    io.to(`post-${comment.post}`).emit("comment-updated", comment);
 
     successResponse(res, HTTP_STATUS.OK, "Comment updated successfully", { comment });
 });
 
 /**
- * @desc    Delete a comment
+ * @desc    Delete comment
  * @route   DELETE /api/comments/:commentId
  * @access  Private
  */
@@ -250,21 +289,22 @@ export const deleteComment = asyncHandler(async (req, res) => {
     const { commentId } = req.params;
     const userId = req.user._id;
 
-    const comment = await findOr404(Comment, commentId, "Comment not found");
+    const comment = await Comment.findById(commentId);
 
-    // Check if user owns the comment or is admin/staff
-    if (!comment.user.equals(userId) && req.user.role !== "admin" && req.user.role !== "staff") {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You can only delete your own comments");
+    if (!comment) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Comment not found");
+    }
+
+    // Check ownership or staff permission
+    if (!comment.user.equals(userId) && req.user.role !== "staff") {
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You don't have permission to delete this comment");
     }
 
     // Soft delete
     comment.isActive = false;
     await comment.save();
-
-    // Emit socket event
-    const { getIO } = await import("../../config/socket.js");
-    const io = getIO();
-    io.to(`post-${comment.post}`).emit("comment-deleted", { commentId: comment._id });
 
     successResponse(res, HTTP_STATUS.OK, "Comment deleted successfully");
 });

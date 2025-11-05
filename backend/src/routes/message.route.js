@@ -13,7 +13,7 @@ import {
     searchMessages,
     getMediaMessages,
     getUnreadCount,
-} from "../controllers/message.controller.js";
+} from "../controllers/message/index.js";
 
 import {
     requireAuth,

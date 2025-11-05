@@ -1,11 +1,9 @@
 import asyncHandler from "express-async-handler";
 import Class from "../../models/class.model.js";
 import User from "../../models/user.model.js";
-import { findOr404 } from "../../utils/helpers.js";
-import { successResponse, errorResponse } from "../../utils/response.js";
+import { successResponse } from "../../utils/response.js";
 import { HTTP_STATUS, CLASS_STATUS, PERMISSIONS, ROLES } from "../../utils/constants.js";
-import { canAccessClass, canEditClass, canDeleteClass } from "../../services/class.service.js";
-import { createPaginatedResponse } from "../../utils/helpers.js";
+import { canAccessClass, canEditClass, canDeleteClass } from "./helpers.js";
 
 /**
  * @desc    Create a new class
@@ -32,13 +30,15 @@ export const createClass = asyncHandler(async (req, res) => {
 
     // Check permissions
     if (!req.user.hasPermission(PERMISSIONS.CREATE_CLASS)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You don't have permission to create classes");
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You don't have permission to create classes");
     }
 
     // Check if code already exists
     const existingClass = await Class.findOne({ code: code.toUpperCase() });
     if (existingClass) {
-        return errorResponse(res, HTTP_STATUS.CONFLICT, "A class with this code already exists");
+        res.status(HTTP_STATUS.CONFLICT);
+        throw new Error("A class with this code already exists");
     }
 
     // Create class data
@@ -138,15 +138,15 @@ export const getClasses = asyncHandler(async (req, res) => {
         isFull: (cls.students?.filter(s => s.status === "active").length || 0) >= cls.maxStudents,
     }));
 
-    return createPaginatedResponse(
-        res,
-        HTTP_STATUS.OK,
-        "Classes retrieved successfully",
-        classesWithVirtuals,
-        total,
-        page,
-        limit
-    );
+    successResponse(res, HTTP_STATUS.OK, "Classes retrieved successfully", {
+        classes: classesWithVirtuals,
+        pagination: {
+            total,
+            page: parseInt(page),
+            limit: parseInt(limit),
+            pages: Math.ceil(total / limit),
+        },
+    });
 });
 
 /**
@@ -163,12 +163,14 @@ export const getClassById = asyncHandler(async (req, res) => {
         .populate("students.student", "firstName lastName username profilePicture role studentId");
 
     if (!classData) {
-        return errorResponse(res, HTTP_STATUS.NOT_FOUND, "Class not found");
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Class not found");
     }
 
     // Check if user has access to this class
     if (!canAccessClass(classData, req.user)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You don't have access to this class");
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You don't have access to this class");
     }
 
     // Convert to object and add virtual fields
@@ -186,11 +188,17 @@ export const updateClass = asyncHandler(async (req, res) => {
     const { classId } = req.params;
     const updates = req.body;
 
-    const classData = await findOr404(Class, classId, "Class not found");
+    const classData = await Class.findById(classId);
+
+    if (!classData) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Class not found");
+    }
 
     // Check permissions
     if (!canEditClass(classData, req.user)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You don't have permission to edit this class");
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You don't have permission to edit this class");
     }
 
     // Handle cover image if uploaded
@@ -220,17 +228,56 @@ export const updateClass = asyncHandler(async (req, res) => {
 export const deleteClass = asyncHandler(async (req, res) => {
     const { classId } = req.params;
 
-    const classData = await findOr404(Class, classId, "Class not found");
+    const classData = await Class.findById(classId);
+
+    if (!classData) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Class not found");
+    }
 
     // Check permissions
     if (!canDeleteClass(classData, req.user)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You don't have permission to delete this class");
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You don't have permission to delete this class");
     }
 
     // Soft delete or archive
     classData.status = CLASS_STATUS.ARCHIVED;
     await classData.save();
 
-    successResponse(res, HTTP_STATUS.OK, "Class deleted successfully", null);
+    successResponse(res, HTTP_STATUS.OK, "Class deleted successfully");
+});
+
+/**
+ * @desc    Search classes
+ * @route   GET /api/classes/search
+ * @access  Private
+ */
+export const searchClasses = asyncHandler(async (req, res) => {
+    const { q, limit = 20, page = 1 } = req.query;
+
+    if (!q) {
+        res.status(HTTP_STATUS.BAD_REQUEST);
+        throw new Error("Search query is required");
+    }
+
+    const skip = (page - 1) * limit;
+
+    const classes = await Class.searchClasses(q)
+        .limit(parseInt(limit))
+        .skip(skip)
+        .populate("mainTeacher", "firstName lastName username profilePicture");
+
+    const total = classes.length;
+
+    successResponse(res, HTTP_STATUS.OK, "Search results retrieved successfully", {
+        classes,
+        pagination: {
+            total,
+            page: parseInt(page),
+            limit: parseInt(limit),
+            pages: Math.ceil(total / limit),
+        },
+    });
 });
 

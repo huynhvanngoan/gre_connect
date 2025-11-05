@@ -11,15 +11,19 @@ interface ChatHeaderProps {
     messagesList: any[];
     conversationLoading: boolean;
     fallbackName?: string;
+    onVoiceCall?: () => void;
+    onVideoCall?: () => void;
 }
 
-export const ChatHeader: React.FC<ChatHeaderProps> = ({
+const ChatHeaderComponent: React.FC<ChatHeaderProps> = ({
     conversationId,
     conversation,
     currentUserId,
     messagesList,
     conversationLoading,
     fallbackName,
+    onVoiceCall,
+    onVideoCall,
 }) => {
     const router = useRouter();
     const navigation = useNavigation();
@@ -101,8 +105,24 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
                 )}
             </View>
 
-            {/* Options Button */}
-            <View className='flex-row items-center ml-2'>
+            {/* Call Buttons */}
+            <View className='flex-row items-center ml-2 gap-2'>
+                {onVoiceCall && (
+                    <TouchableOpacity
+                        className='p-2 rounded-full active:bg-gray-100'
+                        onPress={onVoiceCall}
+                    >
+                        <Feather name='phone' size={20} color="#1DA1F2" />
+                    </TouchableOpacity>
+                )}
+                {onVideoCall && (
+                    <TouchableOpacity
+                        className='p-2 rounded-full active:bg-gray-100'
+                        onPress={onVideoCall}
+                    >
+                        <Feather name='video' size={20} color="#1DA1F2" />
+                    </TouchableOpacity>
+                )}
                 <TouchableOpacity className='p-2 rounded-full active:bg-gray-100'>
                     <Feather name='more-vertical' size={20} color="#1DA1F2" />
                 </TouchableOpacity>
@@ -110,4 +130,6 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
         </View>
     );
 };
+
+export const ChatHeader = React.memo(ChatHeaderComponent);
 

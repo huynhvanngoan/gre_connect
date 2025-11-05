@@ -9,6 +9,7 @@ const getApiUrl = () => {
   // Fallback defaults
   return __DEV__ 
     ? 'http://192.168.100.174:5001/api/v1'  // Development - use your computer's IP
+    // ? 'https://gre-connect-omega.vercel.app/api/v1'  // Development - use your computer's IP
     : 'https://gre-connect-omega.vercel.app/api/v1'; // Production - Vercel
 };
 
@@ -82,6 +83,17 @@ export const API_ENDPOINTS = {
     dismiss: (id: string) => `/notifications/${id}`,
     dismissAll: '/notifications/dismiss-all',
     preferences: '/notifications/preferences',
+  },
+
+  // Calls
+  calls: {
+    list: '/calls',
+    get: (id: string) => `/calls/${id}`,
+    initiate: '/calls',
+    join: (id: string) => `/calls/${id}/join`,
+    end: (id: string) => `/calls/${id}/end`,
+    decline: (id: string) => `/calls/${id}/decline`,
+    toggleMedia: (id: string) => `/calls/${id}/media`,
   },
 };
 

@@ -1,9 +1,6 @@
 import asyncHandler from "express-async-handler";
 import User from "../../models/user.model.js";
-import { findOr404 } from "../../utils/helpers.js";
-import { successResponse, errorResponse } from "../../utils/response.js";
-import { HTTP_STATUS } from "../../utils/constants.js";
-import { canViewProfile, getUserStatistics, filterUserDataByPrivacy } from "../../services/user.service.js";
+import Post from "../../models/post.model.js";
 
 /**
  * @desc    Get current logged in user
@@ -17,10 +14,14 @@ export const getCurrentUser = asyncHandler(async (req, res) => {
         .select("-__v");
 
     if (!user) {
-        return errorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found");
+        res.status(404);
+        throw new Error("User not found");
     }
 
-    successResponse(res, HTTP_STATUS.OK, "Current user retrieved successfully", user);
+    res.status(200).json({
+        success: true,
+        data: user,
+    });
 });
 
 /**
@@ -39,26 +40,46 @@ export const getUserProfile = asyncHandler(async (req, res) => {
         : await User.findOne({ username: identifier });
 
     if (!user) {
-        return errorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found");
+        res.status(404);
+        throw new Error("User not found");
     }
 
     // Check if user is active
     if (!user.isActive) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "This account is not active");
+        res.status(403);
+        throw new Error("This account is not active");
     }
 
     // Privacy check
     const viewer = req.user; // May be undefined if not authenticated
-    const canView = canViewProfile(user, viewer);
+    const canView = user.canViewProfile(viewer);
 
     if (!canView) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You don't have permission to view this profile");
+        res.status(403);
+        throw new Error("You don't have permission to view this profile");
     }
 
-    // Filter user data based on privacy settings
-    const userData = filterUserDataByPrivacy(user, viewer);
+    // Select fields based on privacy settings
+    let userData = user.toObject();
 
-    successResponse(res, HTTP_STATUS.OK, "User profile retrieved successfully", userData);
+    if (!user.privacySettings.showEmail) {
+        delete userData.email;
+    }
+
+    if (!user.privacySettings.showPhone) {
+        delete userData.phone;
+    }
+
+    // Add relationship status if viewer is logged in
+    if (viewer) {
+        userData.isFollowing = user.followers.some(id => id.equals(viewer._id));
+        userData.isFollowedBy = user.following.some(id => id.equals(viewer._id));
+    }
+
+    res.status(200).json({
+        success: true,
+        data: userData,
+    });
 });
 
 /**
@@ -67,7 +88,12 @@ export const getUserProfile = asyncHandler(async (req, res) => {
  * @access  Private
  */
 export const updateUserProfile = asyncHandler(async (req, res) => {
-    const user = await findOr404(User, req.user._id, "User not found");
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+        res.status(404);
+        throw new Error("User not found");
+    }
 
     // Fields that can be updated
     const allowedUpdates = [
@@ -96,7 +122,11 @@ export const updateUserProfile = asyncHandler(async (req, res) => {
 
     await user.save();
 
-    successResponse(res, HTTP_STATUS.OK, "Profile updated successfully", user);
+    res.status(200).json({
+        success: true,
+        message: "Profile updated successfully",
+        data: user,
+    });
 });
 
 /**
@@ -106,17 +136,27 @@ export const updateUserProfile = asyncHandler(async (req, res) => {
  */
 export const updateProfilePicture = asyncHandler(async (req, res) => {
     if (!req.file) {
-        return errorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please upload an image");
+        res.status(400);
+        throw new Error("Please upload an image");
     }
 
-    const user = await findOr404(User, req.user._id, "User not found");
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+        res.status(404);
+        throw new Error("User not found");
+    }
 
     // Upload to Cloudinary (handled by middleware)
     user.profilePicture = req.file.path; // Cloudinary URL
     await user.save();
 
-    successResponse(res, HTTP_STATUS.OK, "Profile picture updated successfully", {
-        profilePicture: user.profilePicture,
+    res.status(200).json({
+        success: true,
+        message: "Profile picture updated successfully",
+        data: {
+            profilePicture: user.profilePicture,
+        },
     });
 });
 
@@ -127,16 +167,26 @@ export const updateProfilePicture = asyncHandler(async (req, res) => {
  */
 export const updateBannerImage = asyncHandler(async (req, res) => {
     if (!req.file) {
-        return errorResponse(res, HTTP_STATUS.BAD_REQUEST, "Please upload an image");
+        res.status(400);
+        throw new Error("Please upload an image");
     }
 
-    const user = await findOr404(User, req.user._id, "User not found");
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+        res.status(404);
+        throw new Error("User not found");
+    }
 
     user.bannerImage = req.file.path;
     await user.save();
 
-    successResponse(res, HTTP_STATUS.OK, "Banner image updated successfully", {
-        bannerImage: user.bannerImage,
+    res.status(200).json({
+        success: true,
+        message: "Banner image updated successfully",
+        data: {
+            bannerImage: user.bannerImage,
+        },
     });
 });
 
@@ -146,13 +196,21 @@ export const updateBannerImage = asyncHandler(async (req, res) => {
  * @access  Private
  */
 export const deleteUser = asyncHandler(async (req, res) => {
-    const user = await findOr404(User, req.user._id, "User not found");
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+        res.status(404);
+        throw new Error("User not found");
+    }
 
     // Soft delete: deactivate account
     user.isActive = false;
     await user.save();
 
-    successResponse(res, HTTP_STATUS.OK, "Account deactivated successfully", null);
+    res.status(200).json({
+        success: true,
+        message: "Account deactivated successfully",
+    });
 });
 
 /**
@@ -161,12 +219,43 @@ export const deleteUser = asyncHandler(async (req, res) => {
  * @access  Private
  */
 export const getUserStats = asyncHandler(async (req, res) => {
-    const stats = await getUserStatistics(req.user._id);
+    const user = await User.findById(req.user._id);
 
-    if (!stats) {
-        return errorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found");
+    if (!user) {
+        res.status(404);
+        throw new Error("User not found");
     }
 
-    successResponse(res, HTTP_STATUS.OK, "User statistics retrieved successfully", stats);
+    // Get post count
+    const postCount = await Post.countDocuments({ author: user._id });
+
+    // Get saved posts count
+    const savedPostsCount = user.savedPosts.length;
+
+    // Get class count based on role
+    let classCount = 0;
+    if (user.isStudent()) {
+        classCount = user.roleSpecificData.classId ? 1 : 0;
+    } else if (user.isTeacher()) {
+        classCount = user.roleSpecificData.classesTeaching?.length || 0;
+    }
+
+    const stats = {
+        posts: postCount,
+        followers: user.followersCount,
+        following: user.followingCount,
+        savedPosts: savedPostsCount,
+        classes: classCount,
+        points: user.points,
+        badges: user.badges.length,
+        loginCount: user.loginCount,
+        lastLogin: user.lastLogin,
+        memberSince: user.createdAt,
+    };
+
+    res.status(200).json({
+        success: true,
+        data: stats,
+    });
 });
 

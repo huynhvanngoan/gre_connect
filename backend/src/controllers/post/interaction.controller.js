@@ -1,8 +1,9 @@
 import asyncHandler from "express-async-handler";
 import Post from "../../models/post.model.js";
-import { findOr404 } from "../../utils/helpers.js";
-import { successResponse, errorResponse } from "../../utils/response.js";
-import { HTTP_STATUS, NOTIFICATION_TYPES } from "../../utils/constants.js";
+import User from "../../models/user.model.js";
+import { Notification } from "../../models/notification.model.js";
+import { successResponse } from "../../utils/response.js";
+import { HTTP_STATUS, PERMISSIONS, NOTIFICATION_TYPES } from "../../utils/constants.js";
 import { getIO } from "../../config/socket.js";
 
 /**
@@ -12,53 +13,63 @@ import { getIO } from "../../config/socket.js";
  */
 export const toggleLikePost = asyncHandler(async (req, res) => {
     const { postId } = req.params;
+
+    if (!req.user || !req.user._id) {
+        res.status(HTTP_STATUS.UNAUTHORIZED);
+        throw new Error("Authentication required. Please log in to like posts.");
+    }
+
     const userId = req.user._id;
+    const post = await Post.findById(postId);
 
-    const post = await findOr404(Post, postId, "Post not found");
+    if (!post) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Post not found");
+    }
 
-    // Check if already liked
-    const isLiked = post.likes.some(id => id.toString() === userId.toString());
+    if (!post.allowLikes) {
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("Likes are disabled for this post");
+    }
 
-    if (isLiked) {
-        // Unlike
-        post.likes = post.likes.filter(id => !id.toString() === userId.toString());
-        await post.save();
+    const liked = await post.toggleLike(userId);
 
-        successResponse(res, HTTP_STATUS.OK, "Post unliked", {
-            isLiked: false,
-            likesCount: post.likes.length,
-        });
-    } else {
-        // Like
-        post.likes.push(userId);
-        await post.save();
-
-        // Notify post author if not self
-        if (!post.user.equals(userId)) {
-            const { Notification } = await import("../../models/notification.model.js");
+    // Send notification if liked
+    if (liked && !post.user.equals(userId)) {
+        try {
             await Notification.createNotification({
                 recipientId: post.user,
                 senderId: userId,
                 type: NOTIFICATION_TYPES.POST_LIKE,
-                title: "Post Liked",
-                message: `${req.user.fullName} liked your post`,
+                title: "New Like",
+                message: `${req.user.firstName} ${req.user.lastName} liked your post`,
                 actionUrl: `/posts/${postId}`,
-                postId: post._id,
+                postId: postId,
             });
-        }
 
-        successResponse(res, HTTP_STATUS.OK, "Post liked", {
-            isLiked: true,
-            likesCount: post.likes.length,
-        });
+            // Emit socket event
+            const io = getIO();
+            io.to(post.user.toString()).emit("new-like", {
+                postId,
+                user: {
+                    _id: req.user._id,
+                    firstName: req.user.firstName,
+                    lastName: req.user.lastName,
+                    username: req.user.username,
+                    profilePicture: req.user.profilePicture,
+                },
+            });
+        } catch (notifError) {
+            console.error('[toggleLikePost] Failed to send notification:', notifError);
+        }
     }
 
-    // Emit socket event
-    const io = getIO();
-    io.emit("post-like-toggled", {
-        postId: post._id,
-        isLiked: !isLiked,
-        likesCount: post.likes.length,
+    // Reload post to get updated data
+    const updatedPost = await Post.findById(postId).lean();
+
+    successResponse(res, HTTP_STATUS.OK, liked ? "Post liked" : "Post unliked", {
+        liked,
+        likesCount: updatedPost?.likesCount || updatedPost?.likes?.length || 0,
     });
 });
 
@@ -69,32 +80,67 @@ export const toggleLikePost = asyncHandler(async (req, res) => {
  */
 export const sharePost = asyncHandler(async (req, res) => {
     const { postId } = req.params;
-    const { content, visibility } = req.body;
     const userId = req.user._id;
 
-    const originalPost = await findOr404(Post, postId, "Post not found");
+    const post = await Post.findById(postId);
 
-    // Create shared post
-    const sharedPost = await Post.create({
-        user: userId,
-        content: content || "",
-        postType: originalPost.postType,
-        visibility: visibility || originalPost.visibility,
-        sharedPost: originalPost._id,
-        isShared: true,
+    if (!post) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Post not found");
+    }
+
+    if (!post.allowSharing) {
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("Sharing is disabled for this post");
+    }
+
+    await post.share(userId);
+
+    // Send notification
+    if (!post.user.equals(userId)) {
+        await Notification.createNotification({
+            recipientId: post.user,
+            senderId: userId,
+            type: NOTIFICATION_TYPES.POST_SHARE,
+            title: "Post Shared",
+            message: `${req.user.fullName} shared your post`,
+            actionUrl: `/posts/${postId}`,
+            postId: postId,
+        });
+    }
+
+    successResponse(res, HTTP_STATUS.OK, "Post shared successfully", {
+        sharesCount: post.sharesCount,
     });
+});
 
-    // Increment share count
-    originalPost.sharesCount = (originalPost.sharesCount || 0) + 1;
-    await originalPost.save();
+/**
+ * @desc    Pin or unpin a post
+ * @route   POST /api/posts/:postId/pin
+ * @access  Private (Teachers/Staff)
+ */
+export const togglePinPost = asyncHandler(async (req, res) => {
+    const { postId } = req.params;
+    const { pinnedUntil } = req.body;
 
-    await sharedPost.populate("user", "firstName lastName username profilePicture role");
+    if (!req.user.hasPermission(PERMISSIONS.PIN_POST)) {
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You don't have permission to pin posts");
+    }
 
-    // Emit socket event
-    const io = getIO();
-    io.emit("post-shared", sharedPost);
+    const post = await Post.findById(postId);
 
-    successResponse(res, HTTP_STATUS.CREATED, "Post shared successfully", { post: sharedPost });
+    if (!post) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Post not found");
+    }
+
+    await post.togglePin(pinnedUntil);
+
+    successResponse(res, HTTP_STATUS.OK, post.isPinned ? "Post pinned" : "Post unpinned", {
+        isPinned: post.isPinned,
+        pinnedUntil: post.pinnedUntil,
+    });
 });
 
 /**
@@ -104,26 +150,33 @@ export const sharePost = asyncHandler(async (req, res) => {
  */
 export const reportPost = asyncHandler(async (req, res) => {
     const { postId } = req.params;
-    const { reason, description } = req.body;
+    const { reason } = req.body;
     const userId = req.user._id;
 
-    const post = await findOr404(Post, postId, "Post not found");
+    const post = await Post.findById(postId);
 
-    // Check if already reported by this user
-    const existingReport = post.reports.find(r => r.user.toString() === userId.toString());
-    if (existingReport) {
-        return errorResponse(res, HTTP_STATUS.BAD_REQUEST, "You have already reported this post");
+    if (!post) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Post not found");
     }
 
-    // Add report
-    post.reports.push({
-        user: userId,
-        reason,
-        description,
-        reportedAt: new Date(),
-    });
+    await post.report(userId, reason);
 
-    await post.save();
+    // Notify staff/admin
+    const staffUsers = await User.find({ role: "staff", isActive: true });
+
+    for (const staff of staffUsers) {
+        await Notification.createNotification({
+            recipientId: staff._id,
+            senderId: userId,
+            type: NOTIFICATION_TYPES.SYSTEM_UPDATE,
+            title: "Post Reported",
+            message: `A post has been reported: ${reason}`,
+            actionUrl: `/posts/${postId}`,
+            postId: postId,
+            priority: "high",
+        });
+    }
 
     successResponse(res, HTTP_STATUS.OK, "Post reported successfully");
 });

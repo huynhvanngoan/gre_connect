@@ -1,102 +1,123 @@
 import asyncHandler from "express-async-handler";
 import { Notification } from "../../models/notification.model.js";
-import User from "../../models/user.model.js";
-import { findOr404 } from "../../utils/helpers.js";
-import { successResponse, errorResponse } from "../../utils/response.js";
-import { HTTP_STATUS, NOTIFICATION_TYPES } from "../../utils/constants.js";
+import { successResponse } from "../../utils/response.js";
+import { HTTP_STATUS } from "../../utils/constants.js";
 import { getIO } from "../../config/socket.js";
 
 /**
- * @desc    Create a notification (Admin/Staff)
+ * @desc    Create a notification (System/Admin use)
  * @route   POST /api/notifications
- * @access  Private (Admin/Staff)
+ * @access  Private (Staff)
  */
 export const createNotification = asyncHandler(async (req, res) => {
-    const { recipientId, type, title, message, actionUrl, metadata } = req.body;
-    const senderId = req.user._id;
-
-    // Check if recipient exists
-    const recipient = await findOr404(User, recipientId, "Recipient not found");
-
-    // Create notification
-    const notification = await Notification.createNotification({
+    const {
         recipientId,
-        senderId,
-        type: type || NOTIFICATION_TYPES.SYSTEM,
+        type,
         title,
         message,
+        priority,
         actionUrl,
-        metadata,
+        channels,
+        scheduledFor,
+    } = req.body;
+
+    if (req.user.role !== "staff") {
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("Only staff can create notifications");
+    }
+
+    const notification = await Notification.createNotification({
+        recipientId,
+        senderId: req.user._id,
+        type,
+        title,
+        message,
+        priority,
+        actionUrl,
+        channels,
+        scheduledFor,
     });
 
-    // Emit socket event
-    const io = getIO();
-    io.to(recipientId.toString()).emit("notification", notification);
+    if (notification) {
+        // Emit socket event
+        const io = getIO();
+        io.to(recipientId.toString()).emit("new-notification", notification);
 
-    successResponse(res, HTTP_STATUS.CREATED, "Notification created successfully", { notification });
+        successResponse(res, HTTP_STATUS.CREATED, "Notification created successfully", {
+            notification,
+        });
+    } else {
+        successResponse(res, HTTP_STATUS.OK, "Notification not created (user settings)", {
+            notification: null,
+        });
+    }
 });
 
 /**
- * @desc    Broadcast notification to all users (Admin only)
+ * @desc    Broadcast notification to multiple users
  * @route   POST /api/notifications/broadcast
- * @access  Private (Admin)
+ * @access  Private (Staff)
  */
 export const broadcastNotification = asyncHandler(async (req, res) => {
-    if (req.user.role !== "admin") {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "Only admins can broadcast notifications");
+    const {
+        recipientIds,
+        type,
+        title,
+        message,
+        priority,
+        actionUrl,
+        channels,
+    } = req.body;
+
+    if (req.user.role !== "staff") {
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("Only staff can broadcast notifications");
     }
-
-    const { type, title, message, actionUrl, metadata } = req.body;
-
-    // Get all active users
-    const users = await User.find({ isActive: true, isBanned: false }).select("_id");
 
     const notifications = [];
     const io = getIO();
 
-    for (const user of users) {
+    for (const recipientId of recipientIds) {
         const notification = await Notification.createNotification({
-            recipientId: user._id,
+            recipientId,
             senderId: req.user._id,
-            type: type || NOTIFICATION_TYPES.SYSTEM,
+            type,
             title,
             message,
+            priority,
             actionUrl,
-            metadata,
+            channels,
         });
 
-        notifications.push(notification);
-
-        // Emit socket event
-        io.to(user._id.toString()).emit("notification", notification);
+        if (notification) {
+            notifications.push(notification);
+            // Emit socket event
+            io.to(recipientId.toString()).emit("new-notification", notification);
+        }
     }
 
-    successResponse(res, HTTP_STATUS.CREATED, "Notification broadcasted successfully", {
+    successResponse(res, HTTP_STATUS.CREATED, "Notifications broadcasted successfully", {
         count: notifications.length,
+        total: recipientIds.length,
     });
 });
 
 /**
- * @desc    Cleanup old notifications (Admin only)
+ * @desc    Delete old read notifications
  * @route   DELETE /api/notifications/cleanup
- * @access  Private (Admin)
+ * @access  Private (Staff)
  */
 export const cleanupOldNotifications = asyncHandler(async (req, res) => {
-    if (req.user.role !== "admin") {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "Only admins can cleanup notifications");
+    const { days = 30 } = req.query;
+
+    if (req.user.role !== "staff") {
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("Only staff can cleanup notifications");
     }
 
-    const { days = 30 } = req.query;
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - parseInt(days));
+    const result = await Notification.deleteOld(parseInt(days));
 
-    const result = await Notification.deleteMany({
-        createdAt: { $lt: cutoffDate },
-        isRead: true,
-        isDismissed: true,
-    });
-
-    successResponse(res, HTTP_STATUS.OK, "Old notifications cleaned up", {
+    successResponse(res, HTTP_STATUS.OK, "Old notifications deleted", {
         deletedCount: result.deletedCount,
     });
 });

@@ -69,11 +69,11 @@ const callSchema = new mongoose.Schema(
       type: Number, // in seconds
       default: 0,
     },
-    // WebRTC details (for reference/debugging)
-    webrtcData: {
-      roomId: String,
-      serverId: String,
-      iceServers: [String],
+    // Agora channel details
+    agoraChannel: {
+      channelName: String,
+      token: String,
+      tokenExpiresAt: Date,
     },
     // Recording
     isRecording: {

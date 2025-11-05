@@ -13,7 +13,7 @@ import {
     cleanupOldNotifications,
     getNotificationPreferences,
     updateNotificationPreferences,
-} from "../controllers/notification.controller.js";
+} from "../controllers/notification/index.js";
 
 import {
     requireAuth,

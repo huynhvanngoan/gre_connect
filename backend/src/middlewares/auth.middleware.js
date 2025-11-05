@@ -4,6 +4,40 @@ import User from "../models/user.model.js";
 import { ROLES, PERMISSIONS } from "../utils/constants.js";
 import { logger } from "../utils/logger.js";
 
+// Simple in-memory cache for user lookups (TTL: 5 minutes)
+const userCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+const getUserFromCache = (clerkId) => {
+    const cached = userCache.get(clerkId);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        return cached.user;
+    }
+    userCache.delete(clerkId);
+    return null;
+};
+
+const setUserInCache = (clerkId, user) => {
+    userCache.set(clerkId, {
+        user,
+        timestamp: Date.now(),
+    });
+
+    // Clean up old entries periodically (when cache gets large)
+    if (userCache.size > 1000) {
+        const now = Date.now();
+        for (const [key, value] of userCache.entries()) {
+            if (now - value.timestamp >= CACHE_TTL) {
+                userCache.delete(key);
+            }
+        }
+    }
+};
+
+const invalidateUserCache = (clerkId) => {
+    userCache.delete(clerkId);
+};
+
 /**
  * Require authentication - verify Clerk token
  */
@@ -27,12 +61,22 @@ export const requireAuth = asyncHandler(async (req, res, next) => {
             throw new Error("Not authorized, invalid token");
         }
 
-        // Get user from database using clerkId
-        const user = await User.findOne({ clerkId: clerkUser.sub });
+        // Try to get user from cache first
+        let user = getUserFromCache(clerkUser.sub);
 
         if (!user) {
-            res.status(404);
-            throw new Error("User not found in database");
+            // Get user from database using clerkId
+            user = await User.findOne({ clerkId: clerkUser.sub })
+                .select("+isActive") // Ensure isActive is selected
+                .lean(); // Use lean for better performance since we're caching
+
+            if (!user) {
+                res.status(404);
+                throw new Error("User not found in database");
+            }
+
+            // Cache the user
+            setUserInCache(clerkUser.sub, user);
         }
 
         // Check if user is active
@@ -47,11 +91,10 @@ export const requireAuth = asyncHandler(async (req, res, next) => {
 
         next();
     } catch (error) {
-        logger.error('[requireAuth] Authentication failed', {
+        logger.error('[requireAuth] Error', {
             error: error.message,
             hasAuthHeader: !!req.headers.authorization,
-            path: req.path,
-            ip: req.ip,
+            stack: error.stack,
         });
         res.status(401);
         throw new Error(`Authentication failed: ${error.message}`);
@@ -70,7 +113,18 @@ export const optionalAuth = asyncHandler(async (req, res, next) => {
             const clerkUser = await clerkClient.verifyToken(token);
 
             if (clerkUser) {
-                const user = await User.findOne({ clerkId: clerkUser.sub });
+                // Try cache first
+                let user = getUserFromCache(clerkUser.sub);
+
+                if (!user) {
+                    user = await User.findOne({ clerkId: clerkUser.sub })
+                        .select("+isActive")
+                        .lean();
+                    if (user) {
+                        setUserInCache(clerkUser.sub, user);
+                    }
+                }
+
                 if (user && user.isActive) {
                     req.user = user;
                     req.clerkUser = clerkUser;
@@ -145,26 +199,45 @@ export const checkBanned = asyncHandler(async (req, res, next) => {
         return next();
     }
 
-    if (req.user.isBanned) {
+    // If using cached user (lean), need to fetch fresh data for ban check
+    let user = req.user;
+    if (!user.isBanned && !user.bannedUntil) {
+        // Quick check - if not banned in cache, proceed
+        return next();
+    }
+
+    // Fetch fresh user data for ban check (in case ban status changed)
+    user = await User.findById(req.user._id || req.user);
+    if (!user) {
+        return next();
+    }
+
+    if (user.isBanned) {
         // Check if ban has expired
-        if (req.user.bannedUntil && new Date() > req.user.bannedUntil) {
+        if (user.bannedUntil && new Date() > user.bannedUntil) {
             // Unban user
-            req.user.isBanned = false;
-            req.user.banReason = undefined;
-            req.user.bannedUntil = undefined;
-            await req.user.save();
+            user.isBanned = false;
+            user.banReason = undefined;
+            user.bannedUntil = undefined;
+            await user.save();
+            // Invalidate cache
+            if (user.clerkId) {
+                invalidateUserCache(user.clerkId);
+            }
             return next();
         }
 
         res.status(403);
         throw new Error(
-            `Your account is banned. Reason: ${req.user.banReason}${req.user.bannedUntil
-                ? ` until ${req.user.bannedUntil.toLocaleDateString()}`
+            `Your account is banned. Reason: ${user.banReason}${user.bannedUntil
+                ? ` until ${user.bannedUntil.toLocaleDateString()}`
                 : " permanently"
             }`
         );
     }
 
+    // Update req.user with fresh data
+    req.user = user;
     next();
 });
 
@@ -271,10 +344,53 @@ export const checkModifyPermission = () => {
 };
 
 /**
- * @deprecated Use Arcjet middleware from arcjet.middleware.js instead
- * This custom rate limiter has been removed to use Arcjet exclusively
- * which provides better scalability, Redis support, and advanced features
+ * Rate limiting middleware (integrate with Arcjet)
  */
+export const rateLimiter = (options = {}) => {
+    const {
+        maxRequests = 100,
+        windowMs = 15 * 60 * 1000, // 15 minutes
+        message = "Too many requests, please try again later"
+    } = options;
+
+    // Store for tracking requests (in production, use Redis)
+    const requestStore = new Map();
+
+    return asyncHandler(async (req, res, next) => {
+        const identifier = req.user?._id?.toString() || req.ip;
+        const now = Date.now();
+
+        // Get user's request history
+        let userRequests = requestStore.get(identifier) || [];
+
+        // Remove old requests outside the window
+        userRequests = userRequests.filter(timestamp => now - timestamp < windowMs);
+
+        // Check if limit exceeded
+        if (userRequests.length >= maxRequests) {
+            res.status(429);
+            throw new Error(message);
+        }
+
+        // Add current request
+        userRequests.push(now);
+        requestStore.set(identifier, userRequests);
+
+        // Clean up old entries periodically
+        if (Math.random() < 0.01) { // 1% chance
+            for (const [key, requests] of requestStore.entries()) {
+                const validRequests = requests.filter(timestamp => now - timestamp < windowMs);
+                if (validRequests.length === 0) {
+                    requestStore.delete(key);
+                } else {
+                    requestStore.set(key, validRequests);
+                }
+            }
+        }
+
+        next();
+    });
+};
 
 /**
  * Middleware to record user login
@@ -297,7 +413,7 @@ export const checkMessagingPermission = asyncHandler(async (req, res, next) => {
 
     const { recipientId } = req.params;
 
-    const recipient = await User.findById(recipientId);
+    const recipient = await User.findById(recipientId).lean();
 
     if (!recipient) {
         res.status(404);

@@ -3,7 +3,6 @@ import Post from "../../models/post.model.js";
 import { Notification } from "../../models/notification.model.js";
 import { successResponse } from "../../utils/response.js";
 import { HTTP_STATUS, POST_TYPES, NOTIFICATION_TYPES } from "../../utils/constants.js";
-import { findOr404 } from "../../utils/helpers.js";
 
 /**
  * @desc    RSVP to event
@@ -15,7 +14,12 @@ export const rsvpEvent = asyncHandler(async (req, res) => {
     const { status } = req.body;
     const userId = req.user._id;
 
-    const post = await findOr404(Post, postId, "Post not found");
+    const post = await Post.findById(postId);
+
+    if (!post) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Post not found");
+    }
 
     if (post.postType !== POST_TYPES.EVENT) {
         res.status(HTTP_STATUS.BAD_REQUEST);
@@ -48,9 +52,13 @@ export const rsvpEvent = asyncHandler(async (req, res) => {
 export const getEventAttendees = asyncHandler(async (req, res) => {
     const { postId } = req.params;
 
-    const post = await findOr404(Post, postId, "Post not found");
+    const post = await Post.findById(postId)
+        .populate("eventData.attendees.user", "firstName lastName username profilePicture role");
 
-    await post.populate("eventData.attendees.user", "firstName lastName username profilePicture role");
+    if (!post) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Post not found");
+    }
 
     if (post.postType !== POST_TYPES.EVENT) {
         res.status(HTTP_STATUS.BAD_REQUEST);
@@ -63,11 +71,6 @@ export const getEventAttendees = asyncHandler(async (req, res) => {
         notGoing: post.eventData.attendees.filter(a => a.status === "not_going"),
     };
 
-    successResponse(res, HTTP_STATUS.OK, "Event attendees retrieved successfully", {
-        attendees,
-        totalGoing: attendees.going.length,
-        totalMaybe: attendees.maybe.length,
-        totalNotGoing: attendees.notGoing.length,
-    });
+    successResponse(res, HTTP_STATUS.OK, "Attendees retrieved successfully", { attendees });
 });
 

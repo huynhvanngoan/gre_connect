@@ -22,7 +22,7 @@ import {
     getClassStats,
     searchClasses,
     addImportantDate,
-} from "../controllers/class.controller.js";
+} from "../controllers/class/index.js";
 
 import {
     requireAuth,

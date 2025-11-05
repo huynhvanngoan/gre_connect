@@ -22,7 +22,7 @@ import {
     getTrendingTopics,
     getPostsByClass,
     getPostAnalytics,
-} from "../controllers/post.controller.js";
+} from "../controllers/post/index.js";
 
 import {
     requireAuth,

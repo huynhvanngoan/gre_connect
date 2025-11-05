@@ -1,151 +1,180 @@
 import asyncHandler from "express-async-handler";
 import User from "../../models/user.model.js";
-import { findOr404 } from "../../utils/helpers.js";
-import { successResponse, errorResponse } from "../../utils/response.js";
-import { HTTP_STATUS } from "../../utils/constants.js";
-import { createPaginatedResponse } from "../../utils/helpers.js";
-
-/**
- * @desc    Get all users (Admin/Staff only)
- * @route   GET /api/users/all
- * @access  Private (Teacher/Staff)
- */
-export const getAllUsers = asyncHandler(async (req, res) => {
-    const { 
-        role, 
-        isActive, 
-        limit = 50, 
-        page = 1,
-        sortBy = "createdAt",
-        order = "desc"
-    } = req.query;
-    
-    const query = {};
-    
-    if (role) query.role = role;
-    if (isActive !== undefined) query.isActive = isActive === "true";
-    
-    const skip = (page - 1) * limit;
-    const sortOrder = order === "desc" ? -1 : 1;
-    
-    const users = await User.find(query)
-        .select("-__v")
-        .limit(parseInt(limit))
-        .skip(skip)
-        .sort({ [sortBy]: sortOrder });
-    
-    const total = await User.countDocuments(query);
-    
-    return createPaginatedResponse(
-        res,
-        HTTP_STATUS.OK,
-        "Users retrieved successfully",
-        users,
-        total,
-        page,
-        limit
-    );
-});
+import { ROLES } from "../../utils/constants.js";
 
 /**
  * @desc    Ban a user
  * @route   POST /api/users/:userId/ban
- * @access  Private (Staff only)
+ * @access  Private (Admin, Staff)
  */
 export const banUser = asyncHandler(async (req, res) => {
     const { userId } = req.params;
     const { reason, duration } = req.body; // duration in days
     
-    const user = await findOr404(User, userId, "User not found");
-    
-    if (user.isBanned) {
-        return errorResponse(res, HTTP_STATUS.BAD_REQUEST, "User is already banned");
+    // Check if user is admin or staff
+    if (req.user.role !== ROLES.STAFF && req.user.role !== "admin") {
+        res.status(403);
+        throw new Error("Only admins and staff can ban users");
     }
     
-    user.isBanned = true;
-    user.banReason = reason;
+    const user = await User.findById(userId);
     
-    if (duration) {
-        const bannedUntil = new Date();
-        bannedUntil.setDate(bannedUntil.getDate() + parseInt(duration));
-        user.bannedUntil = bannedUntil;
+    if (!user) {
+        res.status(404);
+        throw new Error("User not found");
     }
     
+    // Cannot ban yourself
+    if (user._id.equals(req.user._id)) {
+        res.status(400);
+        throw new Error("You cannot ban yourself");
+    }
+    
+    // Cannot ban other admins/staff
+    if (user.role === ROLES.STAFF || user.role === "admin") {
+        res.status(403);
+        throw new Error("Cannot ban admin or staff members");
+    }
+    
+    // Check if user has isBanned field or use isActive
+    if (user.isBanned !== undefined) {
+        user.isBanned = true;
+        user.banReason = reason;
+        if (duration) {
+            const bannedUntil = new Date();
+            bannedUntil.setDate(bannedUntil.getDate() + parseInt(duration));
+            user.bannedUntil = bannedUntil;
+        }
+    } else {
+        user.isActive = false;
+        user.bannedAt = new Date();
+        user.banReason = reason || "No reason provided";
+    }
     await user.save();
     
-    successResponse(res, HTTP_STATUS.OK, "User banned successfully", {
-        userId: user._id,
-        banReason: user.banReason,
-        bannedUntil: user.bannedUntil,
+    res.status(200).json({
+        success: true,
+        message: "User banned successfully",
     });
 });
 
 /**
  * @desc    Unban a user
  * @route   POST /api/users/:userId/unban
- * @access  Private (Staff only)
+ * @access  Private (Admin, Staff)
  */
 export const unbanUser = asyncHandler(async (req, res) => {
     const { userId } = req.params;
     
-    const user = await findOr404(User, userId, "User not found");
-    
-    if (!user.isBanned) {
-        return errorResponse(res, HTTP_STATUS.BAD_REQUEST, "User is not banned");
+    // Check if user is admin or staff
+    if (req.user.role !== ROLES.STAFF && req.user.role !== "admin") {
+        res.status(403);
+        throw new Error("Only admins and staff can unban users");
     }
     
-    user.isBanned = false;
-    user.banReason = undefined;
-    user.bannedUntil = undefined;
+    const user = await User.findById(userId);
     
+    if (!user) {
+        res.status(404);
+        throw new Error("User not found");
+    }
+    
+    // Check if user has isBanned field or use isActive
+    if (user.isBanned !== undefined) {
+        user.isBanned = false;
+        user.banReason = undefined;
+        user.bannedUntil = undefined;
+    } else {
+        user.isActive = true;
+        user.bannedAt = null;
+        user.banReason = null;
+    }
     await user.save();
     
-    successResponse(res, HTTP_STATUS.OK, "User unbanned successfully", null);
+    res.status(200).json({
+        success: true,
+        message: "User unbanned successfully",
+    });
 });
 
 /**
  * @desc    Verify a user
  * @route   POST /api/users/:userId/verify
- * @access  Private (Staff only)
+ * @access  Private (Admin, Staff)
  */
 export const verifyUser = asyncHandler(async (req, res) => {
     const { userId } = req.params;
     
-    const user = await findOr404(User, userId, "User not found");
+    // Check if user is admin or staff
+    if (req.user.role !== ROLES.STAFF && req.user.role !== "admin") {
+        res.status(403);
+        throw new Error("Only admins and staff can verify users");
+    }
     
-    if (user.isVerified) {
-        return errorResponse(res, HTTP_STATUS.BAD_REQUEST, "User is already verified");
+    const user = await User.findById(userId);
+    
+    if (!user) {
+        res.status(404);
+        throw new Error("User not found");
     }
     
     user.isVerified = true;
     await user.save();
     
-    successResponse(res, HTTP_STATUS.OK, "User verified successfully", null);
+    res.status(200).json({
+        success: true,
+        message: "User verified successfully",
+    });
 });
 
 /**
  * @desc    Change user role
  * @route   PUT /api/users/:userId/role
- * @access  Private (Staff only)
+ * @access  Private (Admin only)
  */
 export const changeUserRole = asyncHandler(async (req, res) => {
     const { userId } = req.params;
     const { role } = req.body;
     
-    const user = await findOr404(User, userId, "User not found");
+    // Check if user is admin
+    if (req.user.role !== "admin") {
+        res.status(403);
+        throw new Error("Only admins can change user roles");
+    }
     
-    const oldRole = user.role;
+    const user = await User.findById(userId);
+    
+    if (!user) {
+        res.status(404);
+        throw new Error("User not found");
+    }
+    
+    // Validate role
+    const validRoles = Object.values(ROLES);
+    if (!validRoles.includes(role)) {
+        res.status(400);
+        throw new Error(`Invalid role. Must be one of: ${validRoles.join(", ")}`);
+    }
+    
+    // Cannot change your own role
+    if (user._id.equals(req.user._id)) {
+        res.status(400);
+        throw new Error("You cannot change your own role");
+    }
+    
     user.role = role;
     
-    // Clear role-specific data when changing roles
-    user.roleSpecificData = {};
+    // Clear role-specific data if changing role
+    if (role !== user.role) {
+        user.roleSpecificData = {};
+    }
     
     await user.save();
     
-    successResponse(res, HTTP_STATUS.OK, "User role changed successfully", {
-        userId: user._id,
-        oldRole,
-        newRole: user.role,
+    res.status(200).json({
+        success: true,
+        message: "User role updated successfully",
+        data: user,
     });
 });
 

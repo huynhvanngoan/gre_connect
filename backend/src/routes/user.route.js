@@ -7,13 +7,13 @@ import {
     updateProfilePicture,
     updateBannerImage,
     deleteUser,
-    
+
     // User Discovery
     searchUsers,
     getUsersByRole,
     getSuggestedUsers,
     getUserStats,
-    
+
     // Relationships
     followUser,
     unfollowUser,
@@ -21,43 +21,43 @@ import {
     getFollowing,
     checkFollowStatus,
     removeFollower,
-    
+
     // Posts & Content
     getUserPosts,
     getSavedPosts,
     savePost,
     unsavePost,
-    
+
     // Settings
     updateNotificationSettings,
     updatePrivacySettings,
     getNotificationSettings,
     getPrivacySettings,
-    
+
     // Points & Badges
     getUserBadges,
     getLeaderboard,
-    
+
     // Admin/Staff functions
     banUser,
     unbanUser,
     verifyUser,
     changeUserRole,
     getAllUsers,
-    
+
     // Class related (for students/teachers)
     getUserClasses,
     getClassmates,
-    
-} from "../controllers/user.controller.js";
 
-import { 
-    requireAuth, 
-    requireRole, 
-    checkBanned 
+} from "../controllers/user/index.js";
+
+import {
+    requireAuth,
+    requireRole,
+    checkBanned
 } from "../middlewares/auth.middleware.js";
 
-import { 
+import {
     validateUserUpdate,
     validateRoleChange,
     validateBanUser,

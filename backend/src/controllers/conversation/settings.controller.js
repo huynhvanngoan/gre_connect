@@ -1,92 +1,8 @@
 import asyncHandler from "express-async-handler";
 import { Conversation } from "../../models/conversation.model.js";
 import Message from "../../models/message.model.js";
-import { findOr404 } from "../../utils/helpers.js";
-import { successResponse, errorResponse } from "../../utils/response.js";
-import { HTTP_STATUS, CONVERSATION_TYPES } from "../../utils/constants.js";
+import { successResponse } from "../../utils/response.js";
 import { getIO } from "../../config/socket.js";
-
-/**
- * @desc    Update conversation details
- * @route   PUT /api/v1/conversations/:conversationId
- * @access  Private
- */
-export const updateConversation = asyncHandler(async (req, res) => {
-    const { conversationId } = req.params;
-    const { name, description, avatar } = req.body;
-
-    const conversation = await findOr404(Conversation, conversationId, "Conversation not found");
-
-    // Check if user is admin
-    if (!conversation.isAdmin(req.user._id)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "Only admins can update conversation details");
-    }
-
-    // Update fields
-    if (name) conversation.name = name;
-    if (description !== undefined) conversation.description = description;
-    if (avatar) conversation.avatar = avatar;
-
-    await conversation.save();
-
-    // Create system messages for specific changes
-    if (name) {
-        await conversation.createSystemMessage(
-            `${req.user.fullName} changed the group name to "${name}"`,
-            "name_changed",
-            {
-                changedBy: req.user._id,
-                newName: name,
-            }
-        );
-    }
-
-    if (avatar) {
-        await conversation.createSystemMessage(
-            `${req.user.fullName} changed the group photo`,
-            "avatar_changed",
-            {
-                changedBy: req.user._id,
-            }
-        );
-    }
-
-    // Emit socket event
-    const io = getIO();
-    io.to(`conversation-${conversationId}`).emit("conversation-updated", conversation);
-
-    successResponse(res, HTTP_STATUS.OK, "Conversation updated successfully", {
-        conversation,
-    });
-});
-
-/**
- * @desc    Delete conversation
- * @route   DELETE /api/v1/conversations/:conversationId
- * @access  Private
- */
-export const deleteConversation = asyncHandler(async (req, res) => {
-    const { conversationId } = req.params;
-
-    const conversation = await findOr404(Conversation, conversationId, "Conversation not found");
-
-    // Only admins can delete group conversations
-    if (conversation.type === CONVERSATION_TYPES.GROUP && !conversation.isAdmin(req.user._id)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "Only admins can delete group conversations");
-    }
-
-    // Soft delete
-    conversation.isActive = false;
-    await conversation.save();
-
-    // Emit socket event
-    const io = getIO();
-    io.to(`conversation-${conversationId}`).emit("conversation-deleted", {
-        conversationId,
-    });
-
-    successResponse(res, HTTP_STATUS.OK, "Conversation deleted successfully");
-});
 
 /**
  * @desc    Update conversation settings
@@ -94,43 +10,49 @@ export const deleteConversation = asyncHandler(async (req, res) => {
  * @access  Private
  */
 export const updateSettings = asyncHandler(async (req, res) => {
-    const { conversationId } = req.params;
-    const settings = req.body;
+  const { conversationId } = req.params;
+  const settings = req.body;
 
-    const conversation = await findOr404(Conversation, conversationId, "Conversation not found");
+  const conversation = await Conversation.findById(conversationId);
 
-    // Check if user is admin
-    if (!conversation.isAdmin(req.user._id)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "Only admins can update settings");
+  if (!conversation) {
+    res.status(404);
+    throw new Error("Conversation not found");
+  }
+
+  // Check if user is admin
+  if (!conversation.isAdmin(req.user._id)) {
+    res.status(403);
+    throw new Error("Only admins can update settings");
+  }
+
+  // Update settings
+  conversation.settings = {
+    ...conversation.settings,
+    ...settings,
+  };
+
+  await conversation.save();
+
+  // Create system message
+  await conversation.createSystemMessage(
+    `${req.user.fullName} updated conversation settings`,
+    "settings_changed",
+    {
+      changedBy: req.user._id,
     }
+  );
 
-    // Update settings
-    conversation.settings = {
-        ...conversation.settings,
-        ...settings,
-    };
+  // Emit socket event
+  const io = getIO();
+  io.to(`conversation-${conversationId}`).emit("conversation-settings-updated", {
+    conversationId,
+    settings: conversation.settings,
+  });
 
-    await conversation.save();
-
-    // Create system message
-    await conversation.createSystemMessage(
-        `${req.user.fullName} updated conversation settings`,
-        "settings_changed",
-        {
-            changedBy: req.user._id,
-        }
-    );
-
-    // Emit socket event
-    const io = getIO();
-    io.to(`conversation-${conversationId}`).emit("conversation-settings-updated", {
-        conversationId,
-        settings: conversation.settings,
-    });
-
-    successResponse(res, HTTP_STATUS.OK, "Settings updated successfully", {
-        settings: conversation.settings,
-    });
+  successResponse(res, 200, "Settings updated successfully", {
+    settings: conversation.settings,
+  });
 });
 
 /**
@@ -139,30 +61,36 @@ export const updateSettings = asyncHandler(async (req, res) => {
  * @access  Private
  */
 export const toggleMute = asyncHandler(async (req, res) => {
-    const { conversationId } = req.params;
-    const { duration } = req.body; // duration in milliseconds, null for permanent
+  const { conversationId } = req.params;
+  const { duration } = req.body; // duration in milliseconds, null for permanent
 
-    const conversation = await findOr404(Conversation, conversationId, "Conversation not found");
+  const conversation = await Conversation.findById(conversationId);
 
-    const participant = conversation.participants.find(p =>
-        p.user.equals(req.user._id)
-    );
+  if (!conversation) {
+    res.status(404);
+    throw new Error("Conversation not found");
+  }
 
-    if (!participant) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You are not a participant in this conversation");
-    }
+  const participant = conversation.participants.find(p =>
+    p.user.equals(req.user._id)
+  );
 
-    if (participant.isMuted) {
-        // Unmute
-        await conversation.unmuteForUser(req.user._id);
-    } else {
-        // Mute
-        await conversation.muteForUser(req.user._id, duration);
-    }
+  if (!participant) {
+    res.status(403);
+    throw new Error("You are not a participant in this conversation");
+  }
 
-    successResponse(res, HTTP_STATUS.OK, `Conversation ${participant.isMuted ? 'unmuted' : 'muted'} successfully`, {
-        isMuted: !participant.isMuted,
-    });
+  if (participant.isMuted) {
+    // Unmute
+    await conversation.unmuteForUser(req.user._id);
+  } else {
+    // Mute
+    await conversation.muteForUser(req.user._id, duration);
+  }
+
+  successResponse(res, 200, `Conversation ${participant.isMuted ? 'unmuted' : 'muted'} successfully`, {
+    isMuted: !participant.isMuted,
+  });
 });
 
 /**
@@ -171,24 +99,30 @@ export const toggleMute = asyncHandler(async (req, res) => {
  * @access  Private
  */
 export const toggleArchive = asyncHandler(async (req, res) => {
-    const { conversationId } = req.params;
+  const { conversationId } = req.params;
 
-    const conversation = await findOr404(Conversation, conversationId, "Conversation not found");
+  const conversation = await Conversation.findById(conversationId);
 
-    const participant = conversation.participants.find(p =>
-        p.user.equals(req.user._id)
-    );
+  if (!conversation) {
+    res.status(404);
+    throw new Error("Conversation not found");
+  }
 
-    if (!participant) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You are not a participant in this conversation");
-    }
+  const participant = conversation.participants.find(p =>
+    p.user.equals(req.user._id)
+  );
 
-    participant.isArchived = !participant.isArchived;
-    await conversation.save();
+  if (!participant) {
+    res.status(403);
+    throw new Error("You are not a participant in this conversation");
+  }
 
-    successResponse(res, HTTP_STATUS.OK, `Conversation ${participant.isArchived ? 'archived' : 'unarchived'} successfully`, {
-        isArchived: participant.isArchived,
-    });
+  participant.isArchived = !participant.isArchived;
+  await conversation.save();
+
+  successResponse(res, 200, `Conversation ${participant.isArchived ? 'archived' : 'unarchived'} successfully`, {
+    isArchived: participant.isArchived,
+  });
 });
 
 /**
@@ -197,25 +131,31 @@ export const toggleArchive = asyncHandler(async (req, res) => {
  * @access  Private
  */
 export const markAsRead = asyncHandler(async (req, res) => {
-    const { conversationId } = req.params;
-    const { messageId } = req.body; // Optional: specific message ID
+  const { conversationId } = req.params;
+  const { messageId } = req.body; // Optional: specific message ID
 
-    const conversation = await findOr404(Conversation, conversationId, "Conversation not found");
+  const conversation = await Conversation.findById(conversationId);
 
-    if (!conversation.isParticipant(req.user._id)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You are not a participant in this conversation");
-    }
+  if (!conversation) {
+    res.status(404);
+    throw new Error("Conversation not found");
+  }
 
-    await conversation.markAsRead(req.user._id, messageId);
+  if (!conversation.isParticipant(req.user._id)) {
+    res.status(403);
+    throw new Error("You are not a participant in this conversation");
+  }
 
-    // Emit socket event
-    const io = getIO();
-    io.to(`conversation-${conversationId}`).emit("conversation-read", {
-        conversationId,
-        userId: req.user._id,
-    });
+  await conversation.markAsRead(req.user._id, messageId);
 
-    successResponse(res, HTTP_STATUS.OK, "Conversation marked as read");
+  // Emit socket event
+  const io = getIO();
+  io.to(`conversation-${conversationId}`).emit("conversation-read", {
+    conversationId,
+    userId: req.user._id,
+  });
+
+  successResponse(res, 200, "Conversation marked as read");
 });
 
 /**
@@ -224,56 +164,53 @@ export const markAsRead = asyncHandler(async (req, res) => {
  * @access  Private
  */
 export const togglePinMessage = asyncHandler(async (req, res) => {
-    const { conversationId, messageId } = req.params;
+  const { conversationId, messageId } = req.params;
 
-    const conversation = await findOr404(Conversation, conversationId, "Conversation not found");
+  const conversation = await Conversation.findById(conversationId);
 
-    // Check if user is admin
-    if (!conversation.isAdmin(req.user._id)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "Only admins can pin messages");
-    }
+  if (!conversation) {
+    res.status(404);
+    throw new Error("Conversation not found");
+  }
 
-    // Check if message exists and belongs to this conversation
-    const message = await Message.findOne({
-        _id: messageId,
-        conversation: conversationId,
-    });
+  // Check if user is admin
+  if (!conversation.isAdmin(req.user._id)) {
+    res.status(403);
+    throw new Error("Only admins can pin messages");
+  }
 
-    if (!message) {
-        return errorResponse(res, HTTP_STATUS.NOT_FOUND, "Message not found");
-    }
+  // Check if message exists and belongs to this conversation
+  const message = await Message.findOne({
+    _id: messageId,
+    conversation: conversationId,
+  });
 
-    // Toggle pin
-    const isPinned = conversation.pinnedMessages.some(
-        pm => pm.message.toString() === messageId
-    );
+  if (!message) {
+    res.status(404);
+    throw new Error("Message not found");
+  }
 
-    if (isPinned) {
-        // Unpin
-        conversation.pinnedMessages = conversation.pinnedMessages.filter(
-            pm => pm.message.toString() !== messageId
-        );
-    } else {
-        // Pin
-        conversation.pinnedMessages.push({
-            message: messageId,
-            pinnedBy: req.user._id,
-            pinnedAt: new Date(),
-        });
-    }
+  // Check if already pinned
+  const isPinned = conversation.pinnedMessages.some(pm =>
+    pm.message.equals(messageId)
+  );
 
-    await conversation.save();
+  if (isPinned) {
+    // Unpin
+    await conversation.unpinMessage(messageId);
+  } else {
+    // Pin
+    await conversation.pinMessage(messageId, req.user._id);
+  }
 
-    // Emit socket event
-    const io = getIO();
-    io.to(`conversation-${conversationId}`).emit("message-pin-toggled", {
-        conversationId,
-        messageId,
-        isPinned: !isPinned,
-    });
+  // Emit socket event
+  const io = getIO();
+  io.to(`conversation-${conversationId}`).emit("message-pinned", {
+    conversationId,
+    messageId,
+    isPinned: !isPinned,
+  });
 
-    successResponse(res, HTTP_STATUS.OK, `Message ${isPinned ? 'unpinned' : 'pinned'} successfully`, {
-        isPinned: !isPinned,
-    });
+  successResponse(res, 200, `Message ${isPinned ? 'unpinned' : 'pinned'} successfully`);
 });
 

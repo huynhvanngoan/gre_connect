@@ -1,8 +1,7 @@
 import asyncHandler from "express-async-handler";
 import Message from "../../models/message.model.js";
 import { Conversation } from "../../models/conversation.model.js";
-import { findOr404 } from "../../utils/helpers.js";
-import { successResponse, errorResponse } from "../../utils/response.js";
+import { successResponse } from "../../utils/response.js";
 import { HTTP_STATUS } from "../../utils/constants.js";
 import { getIO } from "../../config/socket.js";
 
@@ -13,21 +12,28 @@ import { getIO } from "../../config/socket.js";
  */
 export const markAsRead = asyncHandler(async (req, res) => {
     const { messageId } = req.params;
-    const userId = req.user._id;
 
-    const message = await findOr404(Message, messageId, "Message not found");
+    const message = await Message.findById(messageId);
 
-    await message.markAsRead(userId);
+    if (!message) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Message not found");
+    }
+
+    // Mark as read using model method if available
+    if (typeof message.markAsRead === 'function') {
+        await message.markAsRead(req.user._id);
+    }
 
     // Update conversation lastReadAt
     const conversation = await Conversation.findById(message.conversation);
-    await conversation.markAsRead(userId);
+    await conversation.markAsRead(req.user._id);
 
     // Emit socket event
     const io = getIO();
     io.to(`conversation-${message.conversation}`).emit("message-read", {
         messageId: message._id,
-        userId,
+        userId: req.user._id,
         readAt: new Date(),
     });
 
@@ -41,44 +47,33 @@ export const markAsRead = asyncHandler(async (req, res) => {
  */
 export const markAllAsRead = asyncHandler(async (req, res) => {
     const { conversationId } = req.params;
-    const userId = req.user._id;
 
-    const conversation = await findOr404(Conversation, conversationId, "Conversation not found");
+    const conversation = await Conversation.findById(conversationId);
 
-    if (!conversation.isParticipant(userId)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "Access denied");
+    if (!conversation) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Conversation not found");
     }
 
-    const count = await Message.markAllAsRead(conversationId, userId);
-    await conversation.markAsRead(userId);
+    if (!conversation.isParticipant(req.user._id)) {
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("Access denied");
+    }
+
+    // Mark all as read using model method if available
+    const count = typeof Message.markAllAsRead === 'function'
+        ? await Message.markAllAsRead(conversationId, req.user._id)
+        : 0;
+
+    await conversation.markAsRead(req.user._id);
 
     // Emit socket event
     const io = getIO();
     io.to(`conversation-${conversationId}`).emit("messages-read-all", {
-        userId,
+        userId: req.user._id,
         conversationId,
     });
 
     successResponse(res, HTTP_STATUS.OK, "All messages marked as read", { count });
-});
-
-/**
- * @desc    Get unread message count for a conversation
- * @route   GET /api/messages/:conversationId/unread-count
- * @access  Private
- */
-export const getUnreadCount = asyncHandler(async (req, res) => {
-    const { conversationId } = req.params;
-    const userId = req.user._id;
-
-    const conversation = await findOr404(Conversation, conversationId, "Conversation not found");
-
-    if (!conversation.isParticipant(userId)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "Access denied");
-    }
-
-    const count = await conversation.getUnreadCount(userId);
-
-    successResponse(res, HTTP_STATUS.OK, "Unread count retrieved successfully", { count });
 });
 

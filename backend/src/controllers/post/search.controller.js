@@ -1,9 +1,8 @@
 import asyncHandler from "express-async-handler";
 import Post from "../../models/post.model.js";
 import { successResponse } from "../../utils/response.js";
-import { HTTP_STATUS, POST_STATUS } from "../../utils/constants.js";
-import { createPaginatedResponse } from "../../utils/helpers.js";
-import { buildVisibilityQuery } from "../../services/post.service.js";
+import { HTTP_STATUS, POST_STATUS, VISIBILITY_TYPES } from "../../utils/constants.js";
+import { buildVisibilityQuery } from "./helpers.js";
 
 /**
  * @desc    Search posts
@@ -11,56 +10,65 @@ import { buildVisibilityQuery } from "../../services/post.service.js";
  * @access  Private
  */
 export const searchPosts = asyncHandler(async (req, res) => {
-    const { q, limit = 20, page = 1, postType, classId } = req.query;
+    const { q, limit = 20, page = 1 } = req.query;
+
+    if (!q) {
+        res.status(HTTP_STATUS.BAD_REQUEST);
+        throw new Error("Search query is required");
+    }
+
     const skip = (page - 1) * limit;
 
-    if (!q || q.trim().length === 0) {
-        return successResponse(res, HTTP_STATUS.OK, "Posts retrieved successfully", {
-            posts: [],
-            pagination: createPaginatedResponse([], { total: 0, page, limit }).pagination,
-        });
-    }
+    let posts;
+    let total;
 
-    const query = {
-        $text: { $search: q },
-        status: POST_STATUS.PUBLISHED,
-        isActive: true,
-    };
-
-    if (postType) {
-        query.postType = postType;
-    }
-
-    if (classId) {
-        query.$or = [
-            { targetClass: classId },
-            { targetClasses: classId },
-        ];
-    }
-
-    // Apply visibility rules
     if (req.user) {
-        const visibilityQuery = buildVisibilityQuery(req.user);
-        Object.assign(query, visibilityQuery);
+        // User is authenticated - use visibility filtering
+        posts = await Post.searchPosts(q, req.user)
+            .limit(parseInt(limit))
+            .skip(skip)
+            .populate("user", "firstName lastName username profilePicture role");
+
+        const searchRegex = new RegExp(q, "i");
+        total = await Post.countDocuments({
+            $or: [
+                { content: searchRegex },
+                { tags: searchRegex },
+            ],
+            status: POST_STATUS.PUBLISHED,
+            isActive: true,
+        });
     } else {
-        query.visibility = "public";
+        // No user - show only public posts
+        const searchRegex = new RegExp(q, "i");
+        const query = {
+            $or: [
+                { content: searchRegex },
+                { tags: searchRegex },
+            ],
+            status: POST_STATUS.PUBLISHED,
+            isActive: true,
+            visibility: VISIBILITY_TYPES.PUBLIC,
+        };
+
+        posts = await Post.find(query)
+            .limit(parseInt(limit))
+            .skip(skip)
+            .populate("user", "firstName lastName username profilePicture role")
+            .sort({ createdAt: -1 })
+            .lean();
+
+        total = await Post.countDocuments(query);
     }
 
-    const posts = await Post.find(query, { score: { $meta: "textScore" } })
-        .sort({ score: { $meta: "textScore" }, createdAt: -1 })
-        .limit(parseInt(limit))
-        .skip(skip)
-        .populate("user", "firstName lastName username profilePicture role")
-        .populate("targetClass", "name code")
-        .lean();
-
-    const total = await Post.countDocuments(query);
-
-    const pagination = createPaginatedResponse(posts, { total, page, limit });
-
-    successResponse(res, HTTP_STATUS.OK, "Posts retrieved successfully", {
-        posts: pagination.data,
-        pagination: pagination.pagination,
+    successResponse(res, HTTP_STATUS.OK, "Search results retrieved successfully", {
+        posts,
+        pagination: {
+            total,
+            page: parseInt(page),
+            limit: parseInt(limit),
+            pages: Math.ceil(total / limit),
+        },
     });
 });
 
@@ -70,81 +78,134 @@ export const searchPosts = asyncHandler(async (req, res) => {
  * @access  Private
  */
 export const getTrendingPosts = asyncHandler(async (req, res) => {
-    const { limit = 20, days = 7 } = req.query;
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - parseInt(days));
+    const { days = 7, limit = 20 } = req.query;
 
-    const query = {
-        status: POST_STATUS.PUBLISHED,
-        isActive: true,
-        createdAt: { $gte: cutoffDate },
-    };
+    const trendingPosts = await Post.findTrending(parseInt(days));
 
-    // Apply visibility rules
-    if (req.user) {
-        const visibilityQuery = buildVisibilityQuery(req.user);
-        Object.assign(query, visibilityQuery);
-    } else {
-        query.visibility = "public";
-    }
-
-    const posts = await Post.find(query)
-        .sort({ likesCount: -1, commentsCount: -1, sharesCount: -1, createdAt: -1 })
-        .limit(parseInt(limit))
-        .populate("user", "firstName lastName username profilePicture role")
-        .populate("targetClass", "name code")
-        .lean();
+    // Populate user info
+    await Post.populate(trendingPosts, {
+        path: "user",
+        select: "firstName lastName username profilePicture role",
+    });
 
     successResponse(res, HTTP_STATUS.OK, "Trending posts retrieved successfully", {
-        posts,
+        posts: trendingPosts.slice(0, parseInt(limit)),
     });
 });
 
 /**
- * @desc    Get trending topics
+ * @desc    Get trending topics/hashtags
  * @route   GET /api/posts/trending-topics
- * @access  Private
+ * @access  Public
  */
 export const getTrendingTopics = asyncHandler(async (req, res) => {
-    const { limit = 10, days = 30 } = req.query;
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - parseInt(days));
+    const { limit = 20, days = 7 } = req.query;
+    const pastDate = new Date();
+    pastDate.setDate(pastDate.getDate() - parseInt(days));
 
-    const query = {
-        status: POST_STATUS.PUBLISHED,
-        isActive: true,
-        createdAt: { $gte: cutoffDate },
-        tags: { $exists: true, $ne: [] },
-    };
-
-    // Apply visibility rules
+    // Build visibility query
+    let visibilityQuery = {};
     if (req.user) {
-        const visibilityQuery = buildVisibilityQuery(req.user);
-        Object.assign(query, visibilityQuery);
+        visibilityQuery = buildVisibilityQuery(req.user);
     } else {
-        query.visibility = "public";
+        visibilityQuery = { visibility: VISIBILITY_TYPES.PUBLIC };
     }
 
-    const posts = await Post.find(query).select("tags").lean();
-
-    // Count tag frequency
-    const tagCounts = {};
-    posts.forEach(post => {
-        if (post.tags && Array.isArray(post.tags)) {
-            post.tags.forEach(tag => {
-                tagCounts[tag] = (tagCounts[tag] || 0) + 1;
-            });
-        }
-    });
-
-    // Sort by frequency and get top tags
-    const trendingTopics = Object.entries(tagCounts)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, parseInt(limit))
-        .map(([tag, count]) => ({ tag, count }));
+    // Aggregate to get trending topics from tags
+    const trendingTopics = await Post.aggregate([
+        {
+            $match: {
+                createdAt: { $gte: pastDate },
+                status: POST_STATUS.PUBLISHED,
+                isActive: true,
+                tags: { $exists: true, $ne: [] },
+                ...visibilityQuery,
+            },
+        },
+        { $unwind: "$tags" },
+        {
+            $group: {
+                _id: "$tags",
+                count: { $sum: 1 },
+                posts: { $addToSet: "$_id" },
+            },
+        },
+        { $sort: { count: -1 } },
+        { $limit: parseInt(limit) },
+        {
+            $project: {
+                topic: "$_id",
+                count: 1,
+                postsCount: { $size: "$posts" },
+                _id: 0,
+            },
+        },
+    ]);
 
     successResponse(res, HTTP_STATUS.OK, "Trending topics retrieved successfully", {
         topics: trendingTopics,
     });
+});
+
+/**
+ * @desc    Get posts by class
+ * @route   GET /api/posts/class/:classId
+ * @access  Private
+ */
+export const getPostsByClass = asyncHandler(async (req, res) => {
+    const { classId } = req.params;
+    const { limit = 20, page = 1 } = req.query;
+
+    const skip = (page - 1) * limit;
+
+    const posts = await Post.findByClass(classId)
+        .limit(parseInt(limit))
+        .skip(skip)
+        .populate("user", "firstName lastName username profilePicture role");
+
+    const total = await Post.countDocuments({
+        $or: [
+            { targetClass: classId },
+            { targetClasses: classId },
+        ],
+        status: POST_STATUS.PUBLISHED,
+        isActive: true,
+    });
+
+    successResponse(res, HTTP_STATUS.OK, "Class posts retrieved successfully", {
+        posts,
+        pagination: {
+            total,
+            page: parseInt(page),
+            limit: parseInt(limit),
+            pages: Math.ceil(total / limit),
+        },
+    });
+});
+
+/**
+ * @desc    Get post analytics
+ * @route   GET /api/posts/:postId/analytics
+ * @access  Private (Post owner or staff)
+ */
+export const getPostAnalytics = asyncHandler(async (req, res) => {
+    const { postId } = req.params;
+
+    const post = await Post.findById(postId);
+
+    if (!post) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Post not found");
+    }
+
+    // Check permission
+    if (!post.user.equals(req.user._id) && req.user.role !== "staff") {
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You don't have permission to view analytics");
+    }
+
+    const analytics = await Post.getAnalytics(postId);
+
+    successResponse(res, HTTP_STATUS.OK, "Analytics retrieved successfully", { analytics });
 });
 

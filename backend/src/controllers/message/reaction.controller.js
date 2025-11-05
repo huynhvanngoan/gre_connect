@@ -1,8 +1,7 @@
 import asyncHandler from "express-async-handler";
 import Message from "../../models/message.model.js";
 import { Conversation } from "../../models/conversation.model.js";
-import { findOr404 } from "../../utils/helpers.js";
-import { successResponse, errorResponse } from "../../utils/response.js";
+import { successResponse } from "../../utils/response.js";
 import { HTTP_STATUS } from "../../utils/constants.js";
 import { getIO } from "../../config/socket.js";
 
@@ -14,23 +13,28 @@ import { getIO } from "../../config/socket.js";
 export const reactToMessage = asyncHandler(async (req, res) => {
     const { messageId } = req.params;
     const { emoji } = req.body;
-    const userId = req.user._id;
 
-    const message = await findOr404(Message, messageId, "Message not found");
+    const message = await Message.findById(messageId);
+
+    if (!message) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Message not found");
+    }
 
     // Check if user is participant
     const conversation = await Conversation.findById(message.conversation);
-    if (!conversation || !conversation.isParticipant(userId)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "Access denied");
+    if (!conversation || !conversation.isParticipant(req.user._id)) {
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("Access denied");
     }
 
-    await message.addReaction(userId, emoji);
+    await message.addReaction(req.user._id, emoji);
 
     // Emit socket event
     const io = getIO();
     io.to(`conversation-${message.conversation}`).emit("message-reaction", {
         messageId: message._id,
-        userId,
+        userId: req.user._id,
         emoji,
     });
 
@@ -46,17 +50,29 @@ export const reactToMessage = asyncHandler(async (req, res) => {
  */
 export const removeReaction = asyncHandler(async (req, res) => {
     const { messageId } = req.params;
-    const userId = req.user._id;
 
-    const message = await findOr404(Message, messageId, "Message not found");
+    const message = await Message.findById(messageId);
 
-    await message.removeReaction(userId);
+    if (!message) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Message not found");
+    }
+
+    // Check if user is participant
+    const conversation = await Conversation.findById(message.conversation);
+    if (!conversation || !conversation.isParticipant(req.user._id)) {
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("Access denied");
+    }
+
+    // Remove reaction (remove all reactions for this user)
+    await message.removeReaction(req.user._id);
 
     // Emit socket event
     const io = getIO();
     io.to(`conversation-${message.conversation}`).emit("message-reaction-removed", {
         messageId: message._id,
-        userId,
+        userId: req.user._id,
     });
 
     successResponse(res, HTTP_STATUS.OK, "Reaction removed");

@@ -10,7 +10,7 @@ import {
     reportComment,
     hideComment,
     getUserComments,
-} from "../controllers/comment.controller.js";
+} from "../controllers/comment/index.js";
 
 import {
     requireAuth,

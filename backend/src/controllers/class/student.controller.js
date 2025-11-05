@@ -2,11 +2,10 @@ import asyncHandler from "express-async-handler";
 import Class from "../../models/class.model.js";
 import User from "../../models/user.model.js";
 import { Notification } from "../../models/notification.model.js";
-import { findOr404 } from "../../utils/helpers.js";
-import { successResponse, errorResponse } from "../../utils/response.js";
-import { HTTP_STATUS, ROLES, NOTIFICATION_TYPES } from "../../utils/constants.js";
+import { successResponse } from "../../utils/response.js";
+import { HTTP_STATUS, NOTIFICATION_TYPES, ROLES } from "../../utils/constants.js";
 import { getIO } from "../../config/socket.js";
-import { canAccessClass, canManageStudents } from "../../services/class.service.js";
+import { canAccessClass, canManageStudents } from "./helpers.js";
 
 /**
  * @desc    Enroll a student in class
@@ -17,17 +16,24 @@ export const enrollStudent = asyncHandler(async (req, res) => {
     const { classId } = req.params;
     const { studentId } = req.body;
 
-    const classData = await findOr404(Class, classId, "Class not found");
+    const classData = await Class.findById(classId);
+
+    if (!classData) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Class not found");
+    }
 
     // Check permissions
     if (!canManageStudents(classData, req.user)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You don't have permission to enroll students");
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You don't have permission to enroll students");
     }
 
     // Check if student exists
     const student = await User.findById(studentId);
     if (!student || student.role !== ROLES.STUDENT) {
-        return errorResponse(res, HTTP_STATUS.BAD_REQUEST, "Invalid student ID");
+        res.status(HTTP_STATUS.BAD_REQUEST);
+        throw new Error("Invalid student ID");
     }
 
     // Enroll student
@@ -40,7 +46,7 @@ export const enrollStudent = asyncHandler(async (req, res) => {
         type: NOTIFICATION_TYPES.CLASS_JOINED,
         title: "Enrolled in Class",
         message: `You have been enrolled in ${classData.name}`,
-        actionUrl: `/classes/${classId}`,
+        metadata: { classId },
     });
 
     // Emit socket event
@@ -50,7 +56,7 @@ export const enrollStudent = asyncHandler(async (req, res) => {
         className: classData.name,
     });
 
-    successResponse(res, HTTP_STATUS.OK, "Student enrolled successfully", null);
+    successResponse(res, HTTP_STATUS.OK, "Student enrolled successfully");
 });
 
 /**
@@ -61,11 +67,17 @@ export const enrollStudent = asyncHandler(async (req, res) => {
 export const unenrollStudent = asyncHandler(async (req, res) => {
     const { classId, studentId } = req.params;
 
-    const classData = await findOr404(Class, classId, "Class not found");
+    const classData = await Class.findById(classId);
+
+    if (!classData) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Class not found");
+    }
 
     // Check permissions
     if (!canManageStudents(classData, req.user)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You don't have permission to unenroll students");
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You don't have permission to unenroll students");
     }
 
     // Unenroll student
@@ -80,7 +92,7 @@ export const unenrollStudent = asyncHandler(async (req, res) => {
         message: `You have been removed from ${classData.name}`,
     });
 
-    successResponse(res, HTTP_STATUS.OK, "Student unenrolled successfully", null);
+    successResponse(res, HTTP_STATUS.OK, "Student unenrolled successfully");
 });
 
 /**
@@ -96,12 +108,14 @@ export const getClassStudents = asyncHandler(async (req, res) => {
         .populate("students.student", "firstName lastName username profilePicture email studentId");
 
     if (!classData) {
-        return errorResponse(res, HTTP_STATUS.NOT_FOUND, "Class not found");
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Class not found");
     }
 
     // Check access
     if (!canAccessClass(classData, req.user)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You don't have access to this class");
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You don't have access to this class");
     }
 
     // Filter students by status
@@ -124,14 +138,16 @@ export const joinClassWithCode = asyncHandler(async (req, res) => {
 
     // Check if user is a student
     if (req.user.role !== ROLES.STUDENT) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "Only students can join classes with code");
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("Only students can join classes with code");
     }
 
     // Find class by join code
     const classData = await Class.findByJoinCode(joinCode);
 
     if (!classData) {
-        return errorResponse(res, HTTP_STATUS.NOT_FOUND, "Invalid or expired join code");
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Invalid or expired join code");
     }
 
     // Enroll student
@@ -145,7 +161,7 @@ export const joinClassWithCode = asyncHandler(async (req, res) => {
             type: NOTIFICATION_TYPES.CLASS_JOINED,
             title: "New Student",
             message: `${req.user.fullName} joined your class ${classData.name}`,
-            actionUrl: `/classes/${classData._id}`,
+            metadata: { classId: classData._id },
         });
 
         successResponse(res, HTTP_STATUS.OK, "Successfully joined class", {
@@ -157,7 +173,8 @@ export const joinClassWithCode = asyncHandler(async (req, res) => {
             },
         });
     } catch (error) {
-        return errorResponse(res, HTTP_STATUS.BAD_REQUEST, error.message);
+        res.status(HTTP_STATUS.BAD_REQUEST);
+        throw new Error(error.message);
     }
 });
 

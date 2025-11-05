@@ -1,8 +1,5 @@
 import asyncHandler from "express-async-handler";
 import User from "../../models/user.model.js";
-import { findOr404 } from "../../utils/helpers.js";
-import { successResponse } from "../../utils/response.js";
-import { HTTP_STATUS } from "../../utils/constants.js";
 
 /**
  * @desc    Get notification settings
@@ -10,9 +7,17 @@ import { HTTP_STATUS } from "../../utils/constants.js";
  * @access  Private
  */
 export const getNotificationSettings = asyncHandler(async (req, res) => {
-    const user = await findOr404(User, req.user._id, "User not found");
-
-    successResponse(res, HTTP_STATUS.OK, "Notification settings retrieved successfully", user.notificationSettings);
+    const user = await User.findById(req.user._id);
+    
+    if (!user) {
+        res.status(404);
+        throw new Error("User not found");
+    }
+    
+    res.status(200).json({
+        success: true,
+        data: user.notificationSettings,
+    });
 });
 
 /**
@@ -21,18 +26,27 @@ export const getNotificationSettings = asyncHandler(async (req, res) => {
  * @access  Private
  */
 export const updateNotificationSettings = asyncHandler(async (req, res) => {
-    const user = await findOr404(User, req.user._id, "User not found");
-
+    const user = await User.findById(req.user._id);
+    
+    if (!user) {
+        res.status(404);
+        throw new Error("User not found");
+    }
+    
     // Update only provided fields
     Object.keys(req.body).forEach(key => {
         if (user.notificationSettings[key] !== undefined) {
             user.notificationSettings[key] = req.body[key];
         }
     });
-
+    
     await user.save();
-
-    successResponse(res, HTTP_STATUS.OK, "Notification settings updated successfully", user.notificationSettings);
+    
+    res.status(200).json({
+        success: true,
+        message: "Notification settings updated successfully",
+        data: user.notificationSettings,
+    });
 });
 
 /**
@@ -41,9 +55,17 @@ export const updateNotificationSettings = asyncHandler(async (req, res) => {
  * @access  Private
  */
 export const getPrivacySettings = asyncHandler(async (req, res) => {
-    const user = await findOr404(User, req.user._id, "User not found");
-
-    successResponse(res, HTTP_STATUS.OK, "Privacy settings retrieved successfully", user.privacySettings);
+    const user = await User.findById(req.user._id);
+    
+    if (!user) {
+        res.status(404);
+        throw new Error("User not found");
+    }
+    
+    res.status(200).json({
+        success: true,
+        data: user.privacySettings,
+    });
 });
 
 /**
@@ -52,17 +74,26 @@ export const getPrivacySettings = asyncHandler(async (req, res) => {
  * @access  Private
  */
 export const updatePrivacySettings = asyncHandler(async (req, res) => {
-    const user = await findOr404(User, req.user._id, "User not found");
-
+    const user = await User.findById(req.user._id);
+    
+    if (!user) {
+        res.status(404);
+        throw new Error("User not found");
+    }
+    
     // Update only provided fields
     Object.keys(req.body).forEach(key => {
         if (user.privacySettings[key] !== undefined) {
             user.privacySettings[key] = req.body[key];
         }
     });
-
+    
     await user.save();
-
-    successResponse(res, HTTP_STATUS.OK, "Privacy settings updated successfully", user.privacySettings);
+    
+    res.status(200).json({
+        success: true,
+        message: "Privacy settings updated successfully",
+        data: user.privacySettings,
+    });
 });
 

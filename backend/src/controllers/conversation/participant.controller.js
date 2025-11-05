@@ -1,9 +1,8 @@
 import asyncHandler from "express-async-handler";
 import { Conversation } from "../../models/conversation.model.js";
 import User from "../../models/user.model.js";
-import { findOr404 } from "../../utils/helpers.js";
-import { successResponse, errorResponse } from "../../utils/response.js";
-import { HTTP_STATUS } from "../../utils/constants.js";
+import { CONVERSATION_TYPES } from "../../utils/constants.js";
+import { successResponse } from "../../utils/response.js";
 import { getIO } from "../../config/socket.js";
 
 /**
@@ -15,22 +14,24 @@ export const addParticipant = asyncHandler(async (req, res) => {
     const { conversationId } = req.params;
     const { userId, role = "member" } = req.body;
 
-    const conversation = await findOr404(Conversation, conversationId, "Conversation not found");
+    const conversation = await Conversation.findById(conversationId);
+
+    if (!conversation) {
+        res.status(404);
+        throw new Error("Conversation not found");
+    }
 
     // Check permissions
-    if (!conversation.settings?.allowMemberInvites && !conversation.isAdmin(req.user._id)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "Only admins can add participants");
+    if (!conversation.settings.allowMemberInvites && !conversation.isAdmin(req.user._id)) {
+        res.status(403);
+        throw new Error("Only admins can add participants");
     }
 
     // Check if user exists
     const userToAdd = await User.findById(userId);
     if (!userToAdd) {
-        return errorResponse(res, HTTP_STATUS.NOT_FOUND, "User not found");
-    }
-
-    // Check if user is already a participant
-    if (conversation.isParticipant(userId)) {
-        return errorResponse(res, HTTP_STATUS.BAD_REQUEST, "User is already a participant");
+        res.status(404);
+        throw new Error("User not found");
     }
 
     // Add participant
@@ -47,7 +48,7 @@ export const addParticipant = asyncHandler(async (req, res) => {
         user: userToAdd,
     });
 
-    successResponse(res, HTTP_STATUS.OK, "Participant added successfully", {
+    successResponse(res, 200, "Participant added successfully", {
         conversation,
     });
 });
@@ -60,16 +61,23 @@ export const addParticipant = asyncHandler(async (req, res) => {
 export const removeParticipant = asyncHandler(async (req, res) => {
     const { conversationId, userId } = req.params;
 
-    const conversation = await findOr404(Conversation, conversationId, "Conversation not found");
+    const conversation = await Conversation.findById(conversationId);
+
+    if (!conversation) {
+        res.status(404);
+        throw new Error("Conversation not found");
+    }
 
     // Check if user is admin
     if (!conversation.isAdmin(req.user._id)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "Only admins can remove participants");
+        res.status(403);
+        throw new Error("Only admins can remove participants");
     }
 
     // Can't remove yourself this way
     if (userId === req.user._id.toString()) {
-        return errorResponse(res, HTTP_STATUS.BAD_REQUEST, "Use leave endpoint to leave the conversation");
+        res.status(400);
+        throw new Error("Use leave endpoint to leave the conversation");
     }
 
     // Remove participant
@@ -85,7 +93,7 @@ export const removeParticipant = asyncHandler(async (req, res) => {
         userId,
     });
 
-    successResponse(res, HTTP_STATUS.OK, "Participant removed successfully");
+    successResponse(res, 200, "Participant removed successfully");
 });
 
 /**
@@ -96,16 +104,23 @@ export const removeParticipant = asyncHandler(async (req, res) => {
 export const leaveConversation = asyncHandler(async (req, res) => {
     const { conversationId } = req.params;
 
-    const conversation = await findOr404(Conversation, conversationId, "Conversation not found");
+    const conversation = await Conversation.findById(conversationId);
+
+    if (!conversation) {
+        res.status(404);
+        throw new Error("Conversation not found");
+    }
 
     // Can't leave direct conversations
     if (conversation.type === CONVERSATION_TYPES.DIRECT) {
-        return errorResponse(res, HTTP_STATUS.BAD_REQUEST, "Cannot leave direct conversations");
+        res.status(400);
+        throw new Error("Cannot leave direct conversations");
     }
 
     // Can't leave class conversations
     if (conversation.type === CONVERSATION_TYPES.CLASS) {
-        return errorResponse(res, HTTP_STATUS.BAD_REQUEST, "Cannot leave class conversations");
+        res.status(400);
+        throw new Error("Cannot leave class conversations");
     }
 
     // Leave conversation
@@ -118,7 +133,7 @@ export const leaveConversation = asyncHandler(async (req, res) => {
         userId: req.user._id,
     });
 
-    successResponse(res, HTTP_STATUS.OK, "Left conversation successfully");
+    successResponse(res, 200, "Left conversation successfully");
 });
 
 /**
@@ -130,11 +145,17 @@ export const updateParticipantRole = asyncHandler(async (req, res) => {
     const { conversationId, userId } = req.params;
     const { role } = req.body;
 
-    const conversation = await findOr404(Conversation, conversationId, "Conversation not found");
+    const conversation = await Conversation.findById(conversationId);
+
+    if (!conversation) {
+        res.status(404);
+        throw new Error("Conversation not found");
+    }
 
     // Check if user is admin
     if (!conversation.isAdmin(req.user._id)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "Only admins can update participant roles");
+        res.status(403);
+        throw new Error("Only admins can update participant roles");
     }
 
     // Update role
@@ -148,7 +169,7 @@ export const updateParticipantRole = asyncHandler(async (req, res) => {
         role,
     });
 
-    successResponse(res, HTTP_STATUS.OK, "Participant role updated successfully");
+    successResponse(res, 200, "Participant role updated successfully");
 });
 
 /**
@@ -163,16 +184,18 @@ export const getParticipants = asyncHandler(async (req, res) => {
         .populate("participants.user", "firstName lastName username profilePicture role isOnline lastSeen");
 
     if (!conversation) {
-        return errorResponse(res, HTTP_STATUS.NOT_FOUND, "Conversation not found");
+        res.status(404);
+        throw new Error("Conversation not found");
     }
 
     if (!conversation.isParticipant(req.user._id)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You are not a participant in this conversation");
+        res.status(403);
+        throw new Error("You are not a participant in this conversation");
     }
 
     const activeParticipants = conversation.participants.filter(p => p.status === "active");
 
-    successResponse(res, HTTP_STATUS.OK, "Participants retrieved successfully", {
+    successResponse(res, 200, "Participants retrieved successfully", {
         participants: activeParticipants,
         total: activeParticipants.length,
     });

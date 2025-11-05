@@ -1,21 +1,14 @@
 import { errorResponse } from "../utils/response.js";
 import { HTTP_STATUS } from "../utils/constants.js";
 import { logger } from "../utils/logger.js";
-import { ENV } from "../config/env.js";
 
 export const errorMiddleware = (err, req, res, next) => {
-  const isDevelopment = ENV.NODE_ENV === "development";
-
-  // Log error with full details
-  logger.error("Error occurred", {
-    message: err.message,
+  logger.error("Error middleware", {
+    error: err.message,
     stack: err.stack,
     path: req.path,
     method: req.method,
-    ip: req.ip,
-    user: req.user?._id?.toString(),
-    statusCode: err.statusCode || HTTP_STATUS.INTERNAL_SERVER_ERROR,
-    name: err.name,
+    statusCode: err.statusCode || err.status || HTTP_STATUS.INTERNAL_SERVER_ERROR,
   });
 
   // Mongoose validation error
@@ -47,15 +40,10 @@ export const errorMiddleware = (err, req, res, next) => {
     return errorResponse(res, HTTP_STATUS.UNAUTHORIZED, "Token expired");
   }
 
-  // Don't expose internal errors in production
-  const message = isDevelopment
-    ? err.message
-    : "An error occurred. Please try again later.";
-
   // Default error
   return errorResponse(
     res,
     err.statusCode || HTTP_STATUS.INTERNAL_SERVER_ERROR,
-    message
+    err.message || "Internal server error"
   );
 };

@@ -1,4 +1,5 @@
-import { View, Text, TouchableOpacity, Image, Linking, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, Linking, Alert } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import React from 'react';
 import { Feather } from '@expo/vector-icons';
 
@@ -54,13 +55,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <View className='mr-2'>
                         {showAvatar ? (
                             message.sender?.profilePicture ? (
-                                <Image
+                                <ExpoImage
                                     source={{ uri: message.sender.profilePicture }}
-                                    className='size-9 rounded-full'
-                                    style={{
-                                        borderWidth: 2,
-                                        borderColor: '#E5E7EB',
-                                    }}
+                                    style={{ width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: '#E5E7EB' }}
+                                    contentFit="cover"
+                                    cachePolicy="memory-disk"
+                                    transition={200}
                                 />
                             ) : (
                                 <View
@@ -146,14 +146,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                                         if (isImage) {
                                             return (
                                                 <TouchableOpacity key={idx} onPress={handlePress} activeOpacity={0.9}>
-                                                    <Image
+                                                    <ExpoImage
                                                         source={{ uri: mediaUrl }}
-                                                        style={{
-                                                            width: 192,
-                                                            height: 192,
-                                                            borderRadius: 12,
-                                                        }}
-                                                        resizeMode="cover"
+                                                        style={{ width: 192, height: 192, borderRadius: 12 }}
+                                                        contentFit="cover"
+                                                        cachePolicy="memory-disk"
+                                                        placeholder={require('@/assets/images/icon.png')}
+                                                        transition={200}
                                                     />
                                                 </TouchableOpacity>
                                             );

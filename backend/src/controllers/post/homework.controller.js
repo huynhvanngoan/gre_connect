@@ -3,21 +3,24 @@ import Post from "../../models/post.model.js";
 import { Notification } from "../../models/notification.model.js";
 import { successResponse } from "../../utils/response.js";
 import { HTTP_STATUS, POST_TYPES, PERMISSIONS, NOTIFICATION_TYPES } from "../../utils/constants.js";
-import { findOr404 } from "../../utils/helpers.js";
-import { canViewHomeworkSubmissions } from "../../services/post.service.js";
-import { logger } from "../../utils/logger.js";
+import { canViewHomeworkSubmissions } from "./helpers.js";
 
 /**
  * @desc    Submit homework
  * @route   POST /api/posts/:postId/submit
- * @access  Private
+ * @access  Private (Students)
  */
 export const submitHomework = asyncHandler(async (req, res) => {
     const { postId } = req.params;
     const { content, files } = req.body;
     const studentId = req.user._id;
 
-    const post = await findOr404(Post, postId, "Post not found");
+    const post = await Post.findById(postId);
+
+    if (!post) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Post not found");
+    }
 
     if (post.postType !== POST_TYPES.HOMEWORK) {
         res.status(HTTP_STATUS.BAD_REQUEST);
@@ -69,7 +72,12 @@ export const gradeHomework = asyncHandler(async (req, res) => {
         throw new Error("You don't have permission to grade homework");
     }
 
-    const post = await findOr404(Post, postId, "Post not found");
+    const post = await Post.findById(postId);
+
+    if (!post) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Post not found");
+    }
 
     if (post.postType !== POST_TYPES.HOMEWORK) {
         res.status(HTTP_STATUS.BAD_REQUEST);
@@ -100,27 +108,28 @@ export const gradeHomework = asyncHandler(async (req, res) => {
 export const getHomeworkSubmissions = asyncHandler(async (req, res) => {
     const { postId } = req.params;
 
-    const post = await findOr404(Post, postId, "Post not found");
+    const post = await Post.findById(postId)
+        .populate("homeworkData.submissions.student", "firstName lastName username profilePicture studentId")
+        .populate("homeworkData.submissions.gradedBy", "firstName lastName username");
 
-    await post.populate("homeworkData.submissions.student", "firstName lastName username profilePicture studentId");
-    await post.populate("homeworkData.submissions.gradedBy", "firstName lastName username");
+    if (!post) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Post not found");
+    }
 
     if (post.postType !== POST_TYPES.HOMEWORK) {
         res.status(HTTP_STATUS.BAD_REQUEST);
         throw new Error("This is not a homework post");
     }
 
-    // Check permissions
+    // Check permission
     if (!canViewHomeworkSubmissions(post, req.user)) {
         res.status(HTTP_STATUS.FORBIDDEN);
-        throw new Error("You don't have permission to view homework submissions");
+        throw new Error("You don't have permission to view submissions");
     }
 
-    successResponse(res, HTTP_STATUS.OK, "Homework submissions retrieved successfully", {
+    successResponse(res, HTTP_STATUS.OK, "Submissions retrieved successfully", {
         submissions: post.homeworkData.submissions,
-        totalSubmissions: post.homeworkData.submissions.length,
-        graded: post.homeworkData.submissions.filter(s => s.score !== null).length,
-        pending: post.homeworkData.submissions.filter(s => s.score === null).length,
     });
 });
 

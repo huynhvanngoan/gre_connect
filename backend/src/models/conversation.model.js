@@ -222,14 +222,6 @@ conversationSchema.index({ "participants.user": 1, "participants.status": 1 });
 // Index cho active conversations
 conversationSchema.index({ isActive: 1, lastMessageAt: -1 });
 
-// Compound index for user conversations query (optimized for getUserConversations)
-conversationSchema.index({
-  "participants.user": 1,
-  "participants.status": 1,
-  isActive: 1,
-  lastMessageAt: -1
-});
-
 // Text search
 conversationSchema.index({ name: "text", description: "text" });
 

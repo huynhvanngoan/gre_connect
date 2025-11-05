@@ -1,9 +1,7 @@
 import asyncHandler from "express-async-handler";
 import { Notification } from "../../models/notification.model.js";
-import { findOr404 } from "../../utils/helpers.js";
-import { successResponse, errorResponse } from "../../utils/response.js";
+import { successResponse } from "../../utils/response.js";
 import { HTTP_STATUS } from "../../utils/constants.js";
-import { createPaginatedResponse } from "../../utils/helpers.js";
 
 /**
  * @desc    Get all notifications for current user
@@ -47,7 +45,15 @@ export const getNotifications = asyncHandler(async (req, res) => {
     // Get total count
     const total = await Notification.countDocuments(query);
 
-    createPaginatedResponse(res, HTTP_STATUS.OK, "Notifications retrieved successfully", notifications, total, page, limit);
+    successResponse(res, HTTP_STATUS.OK, "Notifications retrieved successfully", {
+        notifications,
+        pagination: {
+            total,
+            page: parseInt(page),
+            limit: parseInt(limit),
+            pages: Math.ceil(total / limit),
+        },
+    });
 });
 
 /**
@@ -95,21 +101,75 @@ export const getNotificationById = asyncHandler(async (req, res) => {
         .populate("sender", "firstName lastName username profilePicture role");
 
     if (!notification) {
-        return errorResponse(res, HTTP_STATUS.NOT_FOUND, "Notification not found");
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Notification not found");
     }
 
-    // Check if notification belongs to user
+    // Check ownership
     if (!notification.recipient.equals(userId)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "Access denied");
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You don't have permission to view this notification");
     }
 
-    // Mark as read if not already read
+    // Mark as read
     if (!notification.isRead) {
-        notification.isRead = true;
-        notification.readAt = new Date();
-        await notification.save();
+        await notification.markAsRead();
     }
 
-    successResponse(res, HTTP_STATUS.OK, "Notification retrieved successfully", { notification });
+    successResponse(res, HTTP_STATUS.OK, "Notification retrieved successfully", {
+        notification,
+    });
+});
+
+/**
+ * @desc    Dismiss a notification
+ * @route   DELETE /api/notifications/:notificationId
+ * @access  Private
+ */
+export const dismissNotification = asyncHandler(async (req, res) => {
+    const { notificationId } = req.params;
+    const userId = req.user._id;
+
+    const notification = await Notification.findById(notificationId);
+
+    if (!notification) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Notification not found");
+    }
+
+    // Check ownership
+    if (!notification.recipient.equals(userId)) {
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You don't have permission to dismiss this notification");
+    }
+
+    await notification.dismiss();
+
+    successResponse(res, HTTP_STATUS.OK, "Notification dismissed");
+});
+
+/**
+ * @desc    Dismiss all notifications
+ * @route   DELETE /api/notifications/dismiss-all
+ * @access  Private
+ */
+export const dismissAllNotifications = asyncHandler(async (req, res) => {
+    const userId = req.user._id;
+
+    await Notification.updateMany(
+        {
+            recipient: userId,
+            isDismissed: false,
+            isActive: true,
+        },
+        {
+            $set: {
+                isDismissed: true,
+                dismissedAt: new Date(),
+            },
+        }
+    );
+
+    successResponse(res, HTTP_STATUS.OK, "All notifications dismissed");
 });
 

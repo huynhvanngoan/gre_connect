@@ -17,7 +17,7 @@ import {
   togglePinMessage,
   searchConversations,
   getParticipants,
-} from "../controllers/conversation.controller.js";
+} from "../controllers/conversation/index.js";
 
 import {
   validateGetConversations,

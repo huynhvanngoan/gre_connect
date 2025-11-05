@@ -592,6 +592,56 @@ class ApiService {
   async updateNotificationPreferences(preferences: any) {
     return this.put(API_ENDPOINTS.notifications.preferences, preferences);
   }
+
+  // Call APIs
+  async initiateCall(data: {
+    conversationId?: string;
+    recipientId?: string;
+    callType: 'voice' | 'audio' | 'video';
+  }) {
+    return this.post(API_ENDPOINTS.calls.initiate, data);
+  }
+
+  async getCall(callId: string) {
+    return this.get(API_ENDPOINTS.calls.get(callId));
+  }
+
+  async joinCall(callId: string, options?: { video?: boolean; audio?: boolean }) {
+    return this.post(API_ENDPOINTS.calls.join(callId), options || {});
+  }
+
+  async endCall(callId: string, reason?: string) {
+    return this.post(API_ENDPOINTS.calls.end(callId), { reason });
+  }
+
+  async declineCall(callId: string) {
+    return this.post(API_ENDPOINTS.calls.decline(callId), {});
+  }
+
+  async toggleCallMedia(callId: string, mediaType: 'audio' | 'video' | 'screen') {
+    return this.put(API_ENDPOINTS.calls.toggleMedia(callId), { mediaType });
+  }
+
+  async getCallHistory(params?: { limit?: number; page?: number; conversationId?: string }) {
+    const queryParams = new URLSearchParams();
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.conversationId) queryParams.append('conversationId', params.conversationId);
+    
+    const query = queryParams.toString();
+    const response = await this.get<{ calls: any[]; pagination?: any }>(
+      API_ENDPOINTS.calls.list + (query ? `?${query}` : '')
+    );
+    
+    if (response.success && response.data) {
+      const calls = Array.isArray(response.data.calls)
+        ? response.data.calls
+        : (Array.isArray(response.data) ? response.data : []);
+      return { ...response, data: calls };
+    }
+    
+    return { ...response, data: [] };
+  }
 }
 
 export const apiService = new ApiService();

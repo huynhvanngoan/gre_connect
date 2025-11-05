@@ -11,6 +11,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import { useSocket } from '@/hooks/useSocket';
 import { joinConversationRoom, leaveConversationRoom, sendTypingStatus } from '@/services/socket';
 import { ChatHeader } from '@/components/chat/ChatHeader';
+import { useCall } from '@/hooks/useCall';
 import { ChatInputBar } from '@/components/chat/ChatInputBar';
 import { MemoMessageBubble as MessageBubble } from '@/components/chat/MessageBubble';
 import { TypingIndicator } from '@/components/chat/TypingIndicator';
@@ -35,9 +36,41 @@ const ChatDetailScreen = () => {
     const conversationData = (conversation as any) || {};
     const { getToken } = useAuth();
     const { socket } = useSocket();
+    const { initiateCall } = useCall();
     const [pendingFiles, setPendingFiles] = React.useState<Array<{ uri: string; mimeType?: string; fileName?: string; kind: 'image' | 'video' | 'file' }>>([]);
     const [typingUsers, setTypingUsers] = React.useState<Set<string>>(new Set());
     const typingTimeoutRef = React.useRef<number | null>(null);
+
+    // Call handlers
+    const handleVoiceCall = async () => {
+        try {
+            const token = await getToken?.({ skipCache: true });
+            if (token) apiService.setAuthToken(token);
+
+            await initiateCall(
+                conversationData.type === 'direct' ? id || undefined : undefined,
+                conversationData.type === 'direct' ? conversationData.participants?.find((p: any) => p.user?._id?.toString() !== currentUserId?.toString())?.user?._id || conversationData.participants?.find((p: any) => p.user?.toString() !== currentUserId?.toString())?.user?.toString() : undefined,
+                'voice'
+            );
+        } catch (err: any) {
+            Alert.alert('Call Error', err.message || 'Failed to initiate voice call');
+        }
+    };
+
+    const handleVideoCall = async () => {
+        try {
+            const token = await getToken?.({ skipCache: true });
+            if (token) apiService.setAuthToken(token);
+
+            await initiateCall(
+                conversationData.type === 'direct' ? id || undefined : undefined,
+                conversationData.type === 'direct' ? conversationData.participants?.find((p: any) => p.user?._id?.toString() !== currentUserId?.toString())?.user?._id || conversationData.participants?.find((p: any) => p.user?.toString() !== currentUserId?.toString())?.user?.toString() : undefined,
+                'video'
+            );
+        } catch (err: any) {
+            Alert.alert('Call Error', err.message || 'Failed to initiate video call');
+        }
+    };
 
     // Note: don't early-return before hooks to preserve hook order
 
@@ -223,6 +256,8 @@ const ChatDetailScreen = () => {
                 conversationLoading={conversationLoading}
                 // @ts-ignore pass-through for fallback group name
                 fallbackName={fallbackName as any}
+                onVoiceCall={handleVoiceCall}
+                onVideoCall={handleVideoCall}
             />
 
             {/* Messages List */}
@@ -265,6 +300,8 @@ const ChatDetailScreen = () => {
                         maxToRenderPerBatch={20}
                         windowSize={7}
                         removeClippedSubviews
+                        updateCellsBatchingPeriod={50}
+                        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
                         contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4, flexGrow: 1 }}
                         showsVerticalScrollIndicator={false}
                         keyboardShouldPersistTaps='handled'

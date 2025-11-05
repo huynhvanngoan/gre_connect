@@ -1,13 +1,11 @@
 import asyncHandler from "express-async-handler";
 import Post from "../../models/post.model.js";
 import { Comment } from "../../models/comment.model.js";
-import User from "../../models/user.model.js";
-import { Notification } from "../../models/notification.model.js";
-import { successResponse, errorResponse } from "../../utils/response.js";
-import { HTTP_STATUS, POST_TYPES, POST_STATUS, VISIBILITY_TYPES, PERMISSIONS, NOTIFICATION_TYPES } from "../../utils/constants.js";
+import { successResponse } from "../../utils/response.js";
+import { HTTP_STATUS, POST_STATUS, POST_TYPES, VISIBILITY_TYPES, PERMISSIONS } from "../../utils/constants.js";
 import { getIO } from "../../config/socket.js";
-import { findOr404, canAccessResource, createPaginatedResponse } from "../../utils/helpers.js";
-import { canViewPost, canEditPost, canDeletePost, buildVisibilityQuery, sendPostNotifications, getCommentsCountMap } from "../../services/post.service.js";
+import { buildVisibilityQuery, canViewPost, canEditPost, canDeletePost } from "./helpers.js";
+import { sendPostNotifications } from "./helpers.js";
 
 /**
  * @desc    Create a new post
@@ -37,11 +35,13 @@ export const createPost = asyncHandler(async (req, res) => {
 
     // Check permissions based on post type
     if (postType === POST_TYPES.ANNOUNCEMENT && !req.user.hasPermission(PERMISSIONS.CREATE_ANNOUNCEMENT)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You don't have permission to create announcements");
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You don't have permission to create announcements");
     }
 
     if (postType === POST_TYPES.HOMEWORK && !req.user.hasPermission(PERMISSIONS.CREATE_HOMEWORK)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You don't have permission to create homework");
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You don't have permission to create homework");
     }
 
     // Prepare post data
@@ -87,12 +87,21 @@ export const createPost = asyncHandler(async (req, res) => {
             }));
         }
 
+        if (req.files.video) {
+            const videoFile = req.files.video[0];
+            postData.video = {
+                url: videoFile.path,
+                thumbnail: videoFile.thumbnail || "",
+                duration: videoFile.duration || 0,
+            };
+        }
+
         if (req.files.attachments) {
             postData.attachments = req.files.attachments.map(file => ({
-                url: file.path,
-                filename: file.originalname,
-                size: file.size,
-                mimeType: file.mimetype,
+                fileName: file.originalname,
+                fileUrl: file.path,
+                fileType: file.mimetype,
+                fileSize: file.size,
             }));
         }
     }
@@ -104,11 +113,31 @@ export const createPost = asyncHandler(async (req, res) => {
     await post.populate("user", "firstName lastName username profilePicture role");
 
     // Send notifications
-    await sendPostNotifications(post, req.user);
+    if (post.status === POST_STATUS.PUBLISHED) {
+        await sendPostNotifications(post);
+    }
 
     // Emit socket event
-    const io = getIO();
-    io.emit("new-post", post);
+    if (post.status === POST_STATUS.PUBLISHED) {
+        const io = getIO();
+
+        if (targetClass) {
+            io.to(`class-${targetClass}`).emit("new-post", post);
+        }
+
+        if (targetClasses && targetClasses.length > 0) {
+            targetClasses.forEach(classId => {
+                io.to(`class-${classId}`).emit("new-post", post);
+            });
+        }
+
+        // Notify mentions
+        if (mentions && mentions.length > 0) {
+            mentions.forEach(userId => {
+                io.to(userId.toString()).emit("new-mention", post);
+            });
+        }
+    }
 
     successResponse(res, HTTP_STATUS.CREATED, "Post created successfully", { post });
 });
@@ -156,7 +185,6 @@ export const getPosts = asyncHandler(async (req, res) => {
     }
 
     // Apply visibility rules based on user role
-    // If no user (public access), only show public posts
     if (req.user) {
         const visibilityQuery = buildVisibilityQuery(req.user);
         Object.assign(query, visibilityQuery);
@@ -164,7 +192,7 @@ export const getPosts = asyncHandler(async (req, res) => {
         query.visibility = VISIBILITY_TYPES.PUBLIC;
     }
 
-    // Get posts - use lean() for better performance
+    // Get posts
     const posts = await Post.find(query)
         .sort({ isPinned: -1, [sortBy]: order === "desc" ? -1 : 1 })
         .limit(parseInt(limit))
@@ -172,24 +200,40 @@ export const getPosts = asyncHandler(async (req, res) => {
         .populate("user", "firstName lastName username profilePicture role")
         .populate("targetClass", "name code")
         .populate("targetClasses", "name code")
-        .lean();
+        .lean({ virtuals: true });
 
     // Get total count
     const total = await Post.countDocuments(query);
 
-    // Compute accurate commentsCount via aggregation (in case post.comments not maintained)
+    // Compute accurate commentsCount via aggregation
     const postIds = posts.map(p => p._id);
-    const commentsCountMap = await getCommentsCountMap(postIds);
+    let commentsCountMap = {};
+    try {
+        const counts = await Comment.aggregate([
+            { $match: { post: { $in: postIds } } },
+            { $group: { _id: "$post", count: { $sum: 1 } } },
+        ]);
+        commentsCountMap = counts.reduce((acc, cur) => { acc[cur._id.toString()] = cur.count; return acc; }, {});
+    } catch { }
 
     // Add virtual fields
     const postsWithVirtuals = posts.map(post => ({
         ...post,
-        commentsCount: commentsCountMap.get(post._id.toString()) || 0,
-        isLiked: post.likes?.some(id => id.toString() === req.user?._id?.toString()) || false,
-        likesCount: post.likes?.length || 0,
+        likesCount: typeof post.likesCount === 'number' ? post.likesCount : (post.likes?.length || 0),
+        commentsCount: (commentsCountMap[post._id.toString()] ?? (typeof post.commentsCount === 'number' ? post.commentsCount : (post.comments?.length || 0))),
+        sharesCount: typeof post.sharesCount === 'number' ? post.sharesCount : (post.shares?.length || 0),
+        isLiked: req.user ? (post.likes?.some?.(id => id.toString() === req.user._id.toString()) || false) : false,
     }));
 
-    createPaginatedResponse(res, HTTP_STATUS.OK, "Posts retrieved successfully", postsWithVirtuals, total, page, limit);
+    successResponse(res, HTTP_STATUS.OK, "Posts retrieved successfully", {
+        posts: postsWithVirtuals,
+        pagination: {
+            total,
+            page: parseInt(page),
+            limit: parseInt(limit),
+            pages: Math.ceil(total / limit),
+        },
+    });
 });
 
 /**
@@ -201,98 +245,121 @@ export const getPostById = asyncHandler(async (req, res) => {
     const { postId } = req.params;
 
     const post = await Post.findById(postId)
-        .populate("user", "firstName lastName username profilePicture role")
+        .populate("user", "firstName lastName username profilePicture role bio")
         .populate("targetClass", "name code")
-        .populate("targetClasses", "name code");
+        .populate("targetClasses", "name code")
+        .populate("mentions", "firstName lastName username profilePicture")
+        .populate({
+            path: "comments",
+            populate: {
+                path: "user",
+                select: "firstName lastName username profilePicture role",
+            },
+        });
 
     if (!post) {
-        return errorResponse(res, HTTP_STATUS.NOT_FOUND, "Post not found");
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Post not found");
     }
 
-    // Check if user can view this post
-    if (!canViewPost(post, req.user)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You don't have permission to view this post");
+    // Check permissions
+    if (!req.user) {
+        if (post.visibility !== VISIBILITY_TYPES.PUBLIC) {
+            res.status(HTTP_STATUS.FORBIDDEN);
+            throw new Error("You don't have permission to view this post");
+        }
+    } else if (!canViewPost(post, req.user)) {
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You don't have permission to view this post");
     }
 
-    // Get comments count
-    const commentsCount = await Comment.countDocuments({ post: postId, isActive: true });
+    // Track view for authenticated users
+    if (req.user?._id && typeof post.addView === 'function') {
+        await post.addView(req.user._id);
+    }
+
+    // Mark announcement as read
+    if (post.postType === POST_TYPES.ANNOUNCEMENT && req.user?._id) {
+        await post.markAsRead(req.user._id);
+    }
 
     // Convert to object and add virtual fields
     const postObject = post.toObject({ virtuals: true });
-    postObject.commentsCount = commentsCount;
-    postObject.isLiked = post.likes?.some(id => id.toString() === req.user._id.toString()) || false;
-    postObject.likesCount = post.likes?.length || 0;
+    postObject.isLiked = req.user?._id ? post.likes.some(id => id.toString() === req.user._id.toString()) : false;
 
     successResponse(res, HTTP_STATUS.OK, "Post retrieved successfully", { post: postObject });
 });
 
 /**
- * @desc    Update a post
+ * @desc    Update post
  * @route   PUT /api/posts/:postId
  * @access  Private
  */
 export const updatePost = asyncHandler(async (req, res) => {
     const { postId } = req.params;
-    const {
-        content,
-        visibility,
-        tags,
-        mentions,
-        allowComments,
-        allowLikes,
-        allowSharing,
-    } = req.body;
+    const updates = req.body;
 
-    const post = await findOr404(Post, postId, "Post not found");
+    const post = await Post.findById(postId);
 
-    // Check if user can edit
+    if (!post) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Post not found");
+    }
+
+    // Check ownership or permissions
     if (!canEditPost(post, req.user)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You don't have permission to edit this post");
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You don't have permission to edit this post");
+    }
+
+    // Save edit history if content changed
+    if (updates.content && updates.content !== post.content) {
+        post.editHistory.push({
+            previousContent: post.content,
+            editedBy: req.user._id,
+        });
+        post.isEdited = true;
     }
 
     // Update fields
-    if (content !== undefined) post.content = content;
-    if (visibility !== undefined) post.visibility = visibility;
-    if (tags !== undefined) post.tags = tags;
-    if (mentions !== undefined) post.mentions = mentions;
-    if (allowComments !== undefined) post.allowComments = allowComments;
-    if (allowLikes !== undefined) post.allowLikes = allowLikes;
-    if (allowSharing !== undefined) post.allowSharing = allowSharing;
+    Object.keys(updates).forEach(key => {
+        if (updates[key] !== undefined) {
+            post[key] = updates[key];
+        }
+    });
 
-    post.isEdited = true;
     await post.save();
 
     await post.populate("user", "firstName lastName username profilePicture role");
-
-    // Emit socket event
-    const io = getIO();
-    io.emit("post-updated", post);
 
     successResponse(res, HTTP_STATUS.OK, "Post updated successfully", { post });
 });
 
 /**
- * @desc    Delete a post
+ * @desc    Delete post
  * @route   DELETE /api/posts/:postId
  * @access  Private
  */
 export const deletePost = asyncHandler(async (req, res) => {
     const { postId } = req.params;
 
-    const post = await findOr404(Post, postId, "Post not found");
+    const post = await Post.findById(postId);
 
-    // Check if user can delete
+    if (!post) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Post not found");
+    }
+
+    // Check ownership or permissions
     if (!canDeletePost(post, req.user)) {
-        return errorResponse(res, HTTP_STATUS.FORBIDDEN, "You don't have permission to delete this post");
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("You don't have permission to delete this post");
     }
 
     // Soft delete
     post.isActive = false;
+    post.status = POST_STATUS.DELETED;
     await post.save();
-
-    // Emit socket event
-    const io = getIO();
-    io.emit("post-deleted", { postId: post._id });
 
     successResponse(res, HTTP_STATUS.OK, "Post deleted successfully");
 });

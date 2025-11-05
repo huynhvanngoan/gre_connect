@@ -1,9 +1,8 @@
 import asyncHandler from "express-async-handler";
 import { Comment } from "../../models/comment.model.js";
-import { findOr404 } from "../../utils/helpers.js";
-import { successResponse, errorResponse } from "../../utils/response.js";
-import { HTTP_STATUS } from "../../utils/constants.js";
-import { createPaginatedResponse } from "../../utils/helpers.js";
+import { Notification } from "../../models/notification.model.js";
+import { successResponse } from "../../utils/response.js";
+import { HTTP_STATUS, NOTIFICATION_TYPES } from "../../utils/constants.js";
 
 /**
  * @desc    Like or unlike a comment
@@ -14,52 +13,31 @@ export const toggleLikeComment = asyncHandler(async (req, res) => {
     const { commentId } = req.params;
     const userId = req.user._id;
 
-    const comment = await findOr404(Comment, commentId, "Comment not found");
+    const comment = await Comment.findById(commentId);
 
-    const isLiked = comment.likes.includes(userId);
+    if (!comment) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Comment not found");
+    }
 
-    if (isLiked) {
-        // Unlike
-        comment.likes = comment.likes.filter(id => !id.equals(userId));
-        await comment.save();
+    const liked = await comment.toggleLike(userId);
 
-        successResponse(res, HTTP_STATUS.OK, "Comment unliked", {
-            isLiked: false,
-            likesCount: comment.likes.length,
-        });
-    } else {
-        // Like
-        comment.likes.push(userId);
-        await comment.save();
-
-        // Notify comment author if not self
-        if (!comment.user.equals(userId)) {
-            const { Notification } = await import("../../models/notification.model.js");
-            const { NOTIFICATION_TYPES } = await import("../../utils/constants.js");
-            await Notification.createNotification({
-                recipientId: comment.user,
-                senderId: userId,
-                type: NOTIFICATION_TYPES.COMMENT_LIKE,
-                title: "Comment Liked",
-                message: `${req.user.fullName} liked your comment`,
-                actionUrl: `/posts/${comment.post}`,
-                commentId: comment._id,
-            });
-        }
-
-        successResponse(res, HTTP_STATUS.OK, "Comment liked", {
-            isLiked: true,
-            likesCount: comment.likes.length,
+    // Send notification if liked
+    if (liked && !comment.user.equals(userId)) {
+        await Notification.createNotification({
+            recipientId: comment.user,
+            senderId: userId,
+            type: NOTIFICATION_TYPES.COMMENT_LIKE,
+            title: "Comment Liked",
+            message: `${req.user.fullName} liked your comment`,
+            actionUrl: `/posts/${comment.post}`,
+            commentId: commentId,
         });
     }
 
-    // Emit socket event
-    const { getIO } = await import("../../config/socket.js");
-    const io = getIO();
-    io.to(`post-${comment.post}`).emit("comment-like-toggled", {
-        commentId: comment._id,
-        isLiked: !isLiked,
-        likesCount: comment.likes.length,
+    successResponse(res, HTTP_STATUS.OK, liked ? "Comment liked" : "Comment unliked", {
+        liked,
+        likesCount: comment.likesCount,
     });
 });
 
@@ -70,71 +48,43 @@ export const toggleLikeComment = asyncHandler(async (req, res) => {
  */
 export const reportComment = asyncHandler(async (req, res) => {
     const { commentId } = req.params;
-    const { reason, description } = req.body;
-    const userId = req.user._id;
+    const { reason } = req.body;
 
-    const comment = await findOr404(Comment, commentId, "Comment not found");
+    const comment = await Comment.findById(commentId);
 
-    // Check if already reported by this user
-    const existingReport = comment.reports.find(r => r.user.equals(userId));
-    if (existingReport) {
-        return errorResponse(res, HTTP_STATUS.BAD_REQUEST, "You have already reported this comment");
+    if (!comment) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Comment not found");
     }
 
-    // Add report
-    comment.reports.push({
-        user: userId,
-        reason,
-        description,
-        reportedAt: new Date(),
-    });
-
-    await comment.save();
+    await comment.report(req.user._id, reason);
 
     successResponse(res, HTTP_STATUS.OK, "Comment reported successfully");
 });
 
 /**
- * @desc    Hide a comment (for current user)
+ * @desc    Hide a comment
  * @route   POST /api/comments/:commentId/hide
- * @access  Private
+ * @access  Private (Staff)
  */
 export const hideComment = asyncHandler(async (req, res) => {
     const { commentId } = req.params;
-    const userId = req.user._id;
+    const { reason } = req.body;
 
-    const comment = await findOr404(Comment, commentId, "Comment not found");
-
-    // Add to user's hidden comments if not already hidden
-    if (!comment.hiddenBy.includes(userId)) {
-        comment.hiddenBy.push(userId);
-        await comment.save();
+    if (req.user.role !== "staff") {
+        res.status(HTTP_STATUS.FORBIDDEN);
+        throw new Error("Only staff can hide comments");
     }
 
+    const comment = await Comment.findById(commentId);
+
+    if (!comment) {
+        res.status(HTTP_STATUS.NOT_FOUND);
+        throw new Error("Comment not found");
+    }
+
+    await comment.hide(reason);
+
     successResponse(res, HTTP_STATUS.OK, "Comment hidden successfully");
-});
-
-/**
- * @desc    Get comments by a specific user
- * @route   GET /api/comments/user/:userId
- * @access  Private
- */
-export const getUserComments = asyncHandler(async (req, res) => {
-    const { userId } = req.params;
-    const { page = 1, limit = 20 } = req.query;
-
-    const skip = (page - 1) * limit;
-
-    const comments = await Comment.find({ user: userId, isActive: true })
-        .populate("post", "title content")
-        .populate("user", "firstName lastName username profilePicture role")
-        .sort({ createdAt: -1 })
-        .limit(parseInt(limit))
-        .skip(skip)
-        .lean();
-
-    const total = await Comment.countDocuments({ user: userId, isActive: true });
-
-    createPaginatedResponse(res, HTTP_STATUS.OK, "User comments retrieved successfully", comments, total, page, limit);
 });
 

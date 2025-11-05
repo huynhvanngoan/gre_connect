@@ -1,8 +1,5 @@
 import asyncHandler from "express-async-handler";
 import User from "../../models/user.model.js";
-import { successResponse, errorResponse } from "../../utils/response.js";
-import { HTTP_STATUS } from "../../utils/constants.js";
-import { createPaginatedResponse } from "../../utils/helpers.js";
 
 /**
  * @desc    Search users
@@ -13,7 +10,8 @@ export const searchUsers = asyncHandler(async (req, res) => {
     const { q, role, limit = 20, page = 1 } = req.query;
     
     if (!q || q.trim().length === 0) {
-        return errorResponse(res, HTTP_STATUS.BAD_REQUEST, "Search query is required");
+        res.status(400);
+        throw new Error("Search query is required");
     }
     
     const searchRegex = new RegExp(q, "i");
@@ -41,15 +39,16 @@ export const searchUsers = asyncHandler(async (req, res) => {
     
     const total = await User.countDocuments(query);
     
-    return createPaginatedResponse(
-        res,
-        HTTP_STATUS.OK,
-        "Users found successfully",
-        users,
-        total,
-        page,
-        limit
-    );
+    res.status(200).json({
+        success: true,
+        data: users,
+        pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total,
+            pages: Math.ceil(total / limit),
+        },
+    });
 });
 
 /**
@@ -70,42 +69,87 @@ export const getUsersByRole = asyncHandler(async (req, res) => {
     
     const total = await User.countDocuments({ role, isActive: true });
     
-    return createPaginatedResponse(
-        res,
-        HTTP_STATUS.OK,
-        "Users retrieved successfully",
-        users,
-        total,
-        page,
-        limit
-    );
+    res.status(200).json({
+        success: true,
+        data: users,
+        pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total,
+            pages: Math.ceil(total / limit),
+        },
+    });
 });
 
 /**
  * @desc    Get suggested users to follow
- * @route   GET /api/users/suggestions
+ * @route   GET /api/users/suggested
  * @access  Private
  */
 export const getSuggestedUsers = asyncHandler(async (req, res) => {
-    const currentUser = await User.findById(req.user._id);
-    if (!currentUser) {
-        return errorResponse(res, HTTP_STATUS.NOT_FOUND, "Current user not found");
-    }
-    
     const { limit = 10 } = req.query;
+    const currentUser = await User.findById(req.user._id);
     
-    // Get users that current user is not following
-    const suggestions = await User.find({
-        _id: { 
-            $ne: currentUser._id,
-            $nin: currentUser.following 
-        },
+    // Get users that current user is not following and not themselves
+    const excludeIds = [currentUser._id, ...currentUser.following];
+    
+    const suggestedUsers = await User.find({
+        _id: { $nin: excludeIds },
         isActive: true,
     })
     .select("firstName lastName username profilePicture bio role")
     .limit(parseInt(limit))
-    .sort({ followersCount: -1, points: -1 }); // Popular users first
+    .sort({ followersCount: -1, createdAt: -1 });
     
-    successResponse(res, HTTP_STATUS.OK, "Suggested users retrieved successfully", suggestions);
+    res.status(200).json({
+        success: true,
+        data: suggestedUsers,
+    });
+});
+
+/**
+ * @desc    Get all users (admin only)
+ * @route   GET /api/users
+ * @access  Private (Admin)
+ */
+export const getAllUsers = asyncHandler(async (req, res) => {
+    // Check if user is admin
+    if (req.user.role !== "staff" && req.user.role !== "admin") {
+        res.status(403);
+        throw new Error("Only admins can access this endpoint");
+    }
+    
+    const { limit = 50, page = 1, role, isActive } = req.query;
+    
+    const query = {};
+    
+    if (role) {
+        query.role = role;
+    }
+    
+    if (isActive !== undefined) {
+        query.isActive = isActive === "true";
+    }
+    
+    const skip = (page - 1) * limit;
+    
+    const users = await User.find(query)
+        .select("-password")
+        .limit(parseInt(limit))
+        .skip(skip)
+        .sort({ createdAt: -1 });
+    
+    const total = await User.countDocuments(query);
+    
+    res.status(200).json({
+        success: true,
+        data: users,
+        pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total,
+            pages: Math.ceil(total / limit),
+        },
+    });
 });
 

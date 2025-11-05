@@ -150,6 +150,12 @@ const meetingSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // Agora channel details
+    agoraChannel: {
+      channelName: String,
+      token: String,
+      tokenExpiresAt: Date,
+    },
     // Settings
     settings: {
       enableWaitingRoom: {

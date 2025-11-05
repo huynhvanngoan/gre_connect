@@ -1,5 +1,6 @@
 import winston from 'winston';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { ENV } from '../config/env.js';
 
@@ -27,6 +28,17 @@ const colors = {
 // Tell winston that we want to link the colors
 winston.addColors(colors);
 
+// Ensure logs directory exists
+const logDir = path.join(__dirname, '../../logs');
+try {
+    if (!fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true });
+    }
+} catch (e) {
+    // Fallback to console if cannot create directory
+    // This should not crash the app
+}
+
 // Define which transports to use
 const transports = [
     // Console transport
@@ -34,14 +46,22 @@ const transports = [
         format: winston.format.combine(
             winston.format.colorize({ all: true }),
             winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+            winston.format.errors({ stack: true }),
+            winston.format.splat(),
             winston.format.printf(
-                (info) => `${info.timestamp} ${info.level}: ${info.message}`
+                (info) => {
+                    const { timestamp, level, message, ...meta } = info;
+                    const metaStr = Object.keys(meta).length > 0
+                        ? ' ' + JSON.stringify(meta, null, 2)
+                        : '';
+                    return `${timestamp} ${level}: ${message}${metaStr}`;
+                }
             )
         ),
     }),
     // Error log file
     new winston.transports.File({
-        filename: path.join(__dirname, '../../logs/error.log'),
+        filename: path.join(logDir, 'error.log'),
         level: 'error',
         format: winston.format.combine(
             winston.format.timestamp(),
@@ -51,7 +71,7 @@ const transports = [
     }),
     // Combined log file
     new winston.transports.File({
-        filename: path.join(__dirname, '../../logs/combined.log'),
+        filename: path.join(logDir, 'combined.log'),
         format: winston.format.combine(
             winston.format.timestamp(),
             winston.format.errors({ stack: true }),
@@ -67,15 +87,11 @@ export const logger = winston.createLogger({
     transports,
     // Handle exceptions
     exceptionHandlers: [
-        new winston.transports.File({
-            filename: path.join(__dirname, '../../logs/exceptions.log'),
-        }),
+        new winston.transports.File({ filename: path.join(logDir, 'exceptions.log') }),
     ],
     // Handle promise rejections
     rejectionHandlers: [
-        new winston.transports.File({
-            filename: path.join(__dirname, '../../logs/rejections.log'),
-        }),
+        new winston.transports.File({ filename: path.join(logDir, 'rejections.log') }),
     ],
 });
 

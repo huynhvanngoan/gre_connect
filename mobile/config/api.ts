@@ -87,13 +87,18 @@ export const API_ENDPOINTS = {
 
   // Calls
   calls: {
-    list: '/calls',
+    list: '/calls/history',
+    history: '/calls/history',
     get: (id: string) => `/calls/${id}`,
-    initiate: '/calls',
+    initiate: '/calls/initiate',
     join: (id: string) => `/calls/${id}/join`,
     end: (id: string) => `/calls/${id}/end`,
     decline: (id: string) => `/calls/${id}/decline`,
     toggleMedia: (id: string) => `/calls/${id}/media`,
+    toggleAudio: (id: string) => `/calls/${id}/audio`,
+    toggleVideo: (id: string) => `/calls/${id}/video`,
+    token: (id: string) => `/calls/${id}/token`,
+    rate: (id: string) => `/calls/${id}/rate`,
   },
 };
 

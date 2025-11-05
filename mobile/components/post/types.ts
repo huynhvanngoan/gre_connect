@@ -17,6 +17,7 @@ export interface PostData {
     author?: PostUser;
     content: string;
     postType?: string;
+    tags?: string[];
     createdAt: string;
     isLiked?: boolean;
     likes?: any[];

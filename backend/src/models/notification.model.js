@@ -140,7 +140,7 @@ const notificationSchema = new mongoose.Schema(
       type: Date,
     },
   },
-  { 
+  {
     timestamps: true,
   }
 );
@@ -153,16 +153,16 @@ notificationSchema.index({ scheduledFor: 1, isActive: 1 });
 notificationSchema.index({ expiresAt: 1 });
 
 // Virtuals
-notificationSchema.virtual('isExpired').get(function() {
+notificationSchema.virtual('isExpired').get(function () {
   return this.expiresAt && new Date() > this.expiresAt;
 });
 
-notificationSchema.virtual('age').get(function() {
+notificationSchema.virtual('age').get(function () {
   return Date.now() - this.createdAt.getTime();
 });
 
 // Methods
-notificationSchema.methods.markAsRead = async function() {
+notificationSchema.methods.markAsRead = async function () {
   if (!this.isRead) {
     this.isRead = true;
     this.readAt = new Date();
@@ -171,11 +171,11 @@ notificationSchema.methods.markAsRead = async function() {
   return this;
 };
 
-notificationSchema.methods.markAsClicked = async function() {
+notificationSchema.methods.markAsClicked = async function () {
   if (!this.isClicked) {
     this.isClicked = true;
     this.clickedAt = new Date();
-    
+
     if (!this.isRead) {
       await this.markAsRead();
     } else {
@@ -185,13 +185,13 @@ notificationSchema.methods.markAsClicked = async function() {
   return this;
 };
 
-notificationSchema.methods.dismiss = async function() {
+notificationSchema.methods.dismiss = async function () {
   this.isDismissed = true;
   this.dismissedAt = new Date();
   return await this.save();
 };
 
-notificationSchema.methods.sendEmail = async function() {
+notificationSchema.methods.sendEmail = async function () {
   // Implement email sending logic here
   // For now, just mark as sent
   this.emailSent = true;
@@ -199,7 +199,7 @@ notificationSchema.methods.sendEmail = async function() {
   return await this.save();
 };
 
-notificationSchema.methods.sendPush = async function() {
+notificationSchema.methods.sendPush = async function () {
   // Implement push notification logic here
   // For now, just mark as sent
   this.pushSent = true;
@@ -208,16 +208,16 @@ notificationSchema.methods.sendPush = async function() {
 };
 
 // Static methods
-notificationSchema.statics.findByUser = function(userId, options = {}) {
-  return this.find({ 
+notificationSchema.statics.findByUser = function (userId, options = {}) {
+  return this.find({
     recipient: userId,
     isActive: true,
     isDismissed: false,
-    ...options 
+    ...options
   }).sort({ createdAt: -1 });
 };
 
-notificationSchema.statics.findUnread = function(userId) {
+notificationSchema.statics.findUnread = function (userId) {
   return this.find({
     recipient: userId,
     isRead: false,
@@ -226,7 +226,7 @@ notificationSchema.statics.findUnread = function(userId) {
   }).sort({ createdAt: -1 });
 };
 
-notificationSchema.statics.getUnreadCount = function(userId) {
+notificationSchema.statics.getUnreadCount = function (userId) {
   return this.countDocuments({
     recipient: userId,
     isRead: false,
@@ -235,7 +235,7 @@ notificationSchema.statics.getUnreadCount = function(userId) {
   });
 };
 
-notificationSchema.statics.markAllAsRead = async function(userId) {
+notificationSchema.statics.markAllAsRead = async function (userId) {
   return await this.updateMany(
     {
       recipient: userId,
@@ -251,17 +251,17 @@ notificationSchema.statics.markAllAsRead = async function(userId) {
   );
 };
 
-notificationSchema.statics.deleteOld = async function(days = 30) {
+notificationSchema.statics.deleteOld = async function (days = 30) {
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - days);
-  
+
   return await this.deleteMany({
     createdAt: { $lt: cutoffDate },
     isRead: true,
   });
 };
 
-notificationSchema.statics.findScheduled = function() {
+notificationSchema.statics.findScheduled = function () {
   return this.find({
     scheduledFor: { $lte: new Date() },
     isActive: true,
@@ -270,7 +270,7 @@ notificationSchema.statics.findScheduled = function() {
 };
 
 // Helper function to create notification
-notificationSchema.statics.createNotification = async function(data) {
+notificationSchema.statics.createNotification = async function (data) {
   const {
     recipientId,
     senderId,
@@ -287,28 +287,30 @@ notificationSchema.statics.createNotification = async function(data) {
     metadata,
     channels = { inApp: true, email: false, push: false },
   } = data;
-  
+
   // Check user's notification settings
   const User = mongoose.model("User");
   const recipient = await User.findById(recipientId);
-  
+
   if (!recipient) {
     throw new Error("Recipient not found");
   }
-  
+
   // Check if user wants this type of notification
-  const notificationSettings = recipient.notificationSettings;
-  
-  // Skip if user has disabled this notification type
-  if (type.includes('homework') && !notificationSettings.homework) return null;
-  if (type.includes('announcement') && !notificationSettings.announcements) return null;
-  if (type.includes('comment') && !notificationSettings.comments) return null;
-  if (type.includes('like') && !notificationSettings.likes) return null;
-  
+  const notificationSettings = recipient.notificationSettings || {};
+
+  // Skip if user has disabled this notification type (only if type is defined)
+  if (type && typeof type === 'string') {
+    if (type.includes('homework') && notificationSettings.homework === false) return null;
+    if (type.includes('announcement') && notificationSettings.announcements === false) return null;
+    if (type.includes('comment') && notificationSettings.comments === false) return null;
+    if (type.includes('like') && notificationSettings.likes === false) return null;
+  }
+
   // Adjust channels based on user preferences
-  if (!notificationSettings.email) channels.email = false;
-  if (!notificationSettings.push) channels.push = false;
-  
+  if (notificationSettings.email === false) channels.email = false;
+  if (notificationSettings.push === false) channels.push = false;
+
   const notification = await this.create({
     recipient: recipientId,
     sender: senderId,
@@ -327,22 +329,22 @@ notificationSchema.statics.createNotification = async function(data) {
     },
     channels,
   });
-  
+
   // Send via appropriate channels
   if (channels.email && notificationSettings.email) {
     await notification.sendEmail();
   }
-  
+
   if (channels.push && notificationSettings.push) {
     await notification.sendPush();
   }
-  
+
   return notification;
 };
 
 // Middleware: Auto-expire old notifications
-notificationSchema.pre("find", function() {
-  this.where({ 
+notificationSchema.pre("find", function () {
+  this.where({
     $or: [
       { expiresAt: null },
       { expiresAt: { $gt: new Date() } }
@@ -351,4 +353,4 @@ notificationSchema.pre("find", function() {
 });
 
 const Notification = mongoose.model("Notification", notificationSchema);
-export {  Notification,  NOTIFICATION_TYPES, NOTIFICATION_PRIORITIES };
+export { Notification, NOTIFICATION_TYPES, NOTIFICATION_PRIORITIES };

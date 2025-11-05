@@ -19,14 +19,50 @@ const getSocketServerUrl = () => {
 export async function initSocket(token?: string) {
   const serverUrl = getSocketServerUrl();
   if (token) currentToken = token;
-  if (socket && socket.connected) return socket;
+  
+  // Nếu đã có socket và đang connected, chỉ update token nếu cần
+  if (socket && socket.connected) {
+    if (token && currentToken !== token) {
+      // Update auth token without reconnecting
+      socket.auth = { token };
+    }
+    return socket;
+  }
 
+  // Nếu đã có socket nhưng chưa connected, đợi hoặc tái sử dụng
+  if (socket && !socket.connected) {
+    // Đợi socket connect hoặc tạo mới sau timeout
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        if (socket && socket.connected) {
+          resolve(socket);
+        } else {
+          // Tạo socket mới nếu timeout
+          socket = io(serverUrl, {
+            transports: ['websocket'],
+            forceNew: true,
+            reconnection: true,
+            reconnectionAttempts: 5, // Giới hạn số lần reconnect
+            reconnectionDelay: 2000, // Tăng delay lên 2 giây
+            reconnectionDelayMax: 10000, // Max delay 10 giây
+            timeout: 10000,
+            auth: currentToken ? { token: currentToken } : undefined,
+          });
+          resolve(socket);
+        }
+        clearTimeout(timeout);
+      }, 1000);
+    });
+  }
+
+  // Tạo socket mới
   socket = io(serverUrl, {
     transports: ['websocket'],
     forceNew: false,
     reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelay: 500,
+    reconnectionAttempts: 5, // Giới hạn số lần reconnect
+    reconnectionDelay: 2000, // Tăng delay lên 2 giây
+    reconnectionDelayMax: 10000, // Max delay 10 giây
     timeout: 10000,
     auth: currentToken ? { token: currentToken } : undefined,
   });
@@ -41,9 +77,12 @@ export function getSocket(): Socket | null {
 export function setSocketAuthToken(token: string) {
   currentToken = token;
   if (socket) {
-    // socket.io v4 supports dynamic auth update via connect with new instance; for simplicity, disconnect/reconnect
-    if (socket.connected) socket.disconnect();
-    initSocket(token);
+    // Update auth token without reconnecting
+    socket.auth = { token };
+    // Chỉ reconnect nếu socket chưa connected
+    if (!socket.connected) {
+      socket.connect();
+    }
   }
 }
 

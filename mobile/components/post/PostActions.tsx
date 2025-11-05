@@ -4,7 +4,7 @@ import { Feather } from '@expo/vector-icons';
 import { LikeButton } from './LikeButton';
 import { PostActionsProps } from './types';
 
-export const PostActions: React.FC<PostActionsProps> = ({
+const PostActionsComponent: React.FC<PostActionsProps> = ({
     isLiked,
     likesCount,
     commentsCount,
@@ -60,4 +60,15 @@ export const PostActions: React.FC<PostActionsProps> = ({
         </View>
     );
 };
+
+// Memoize component
+export const PostActions = React.memo(PostActionsComponent, (prevProps, nextProps) => {
+    return (
+        prevProps.isLiked === nextProps.isLiked &&
+        prevProps.likesCount === nextProps.likesCount &&
+        prevProps.commentsCount === nextProps.commentsCount &&
+        prevProps.sharesCount === nextProps.sharesCount &&
+        prevProps.isLiking === nextProps.isLiking
+    );
+});
 

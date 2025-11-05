@@ -1,18 +1,21 @@
 import { View, Text, Image } from 'react-native';
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Feather } from '@expo/vector-icons';
 import { RoleBadge } from '@/components/RoleBadge';
 import { formatRelativeTime } from '@/utils/date';
 import { PostHeaderProps } from './types';
 
-export const PostHeader: React.FC<PostHeaderProps> = ({ user, author, createdAt }) => {
-    const displayUser = user || author;
-    const profilePicture = displayUser?.profilePicture;
-    const firstName = displayUser?.firstName || '';
-    const lastName = displayUser?.lastName || '';
-    const username = displayUser?.username || 'unknown';
-    const role = displayUser?.role;
-    const isVerified = displayUser?.isVerified;
+const PostHeaderComponent: React.FC<PostHeaderProps> = ({ user, author, createdAt }) => {
+    const displayUser = useMemo(() => user || author, [user, author]);
+
+    const profilePicture = useMemo(() => displayUser?.profilePicture, [displayUser?.profilePicture]);
+    const firstName = useMemo(() => displayUser?.firstName || '', [displayUser?.firstName]);
+    const lastName = useMemo(() => displayUser?.lastName || '', [displayUser?.lastName]);
+    const username = useMemo(() => displayUser?.username || 'unknown', [displayUser?.username]);
+    const role = useMemo(() => displayUser?.role, [displayUser?.role]);
+    const isVerified = useMemo(() => displayUser?.isVerified, [displayUser?.isVerified]);
+
+    const formattedTime = useMemo(() => formatRelativeTime(createdAt), [createdAt]);
 
     return (
         <View className='flex-row items-center mb-3'>
@@ -20,6 +23,7 @@ export const PostHeader: React.FC<PostHeaderProps> = ({ user, author, createdAt 
                 <Image
                     source={{ uri: profilePicture }}
                     className='size-12 rounded-full mr-3'
+                    resizeMode="cover"
                     style={{
                         borderWidth: 2,
                         borderColor: '#E5E7EB',
@@ -48,10 +52,25 @@ export const PostHeader: React.FC<PostHeaderProps> = ({ user, author, createdAt 
                     <RoleBadge role={role} />
                 </View>
                 <Text className='text-xs' style={{ color: '#6B7280' }}>
-                    @{username} · {formatRelativeTime(createdAt)}
+                    @{username} · {formattedTime}
                 </Text>
             </View>
         </View>
     );
 };
+
+// Memoize component
+export const PostHeader = React.memo(PostHeaderComponent, (prevProps, nextProps) => {
+    // Compare by reference or key properties
+    const prevUserKey = prevProps.user?.username || prevProps.user?.firstName;
+    const nextUserKey = nextProps.user?.username || nextProps.user?.firstName;
+    const prevAuthorKey = prevProps.author?.username || prevProps.author?.firstName;
+    const nextAuthorKey = nextProps.author?.username || nextProps.author?.firstName;
+
+    return (
+        prevUserKey === nextUserKey &&
+        prevAuthorKey === nextAuthorKey &&
+        prevProps.createdAt === nextProps.createdAt
+    );
+});
 

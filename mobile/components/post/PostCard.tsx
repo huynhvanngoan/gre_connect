@@ -1,12 +1,13 @@
 import { View } from 'react-native';
-import React from 'react';
+import React, { useMemo } from 'react';
 import { PostHeader } from './PostHeader';
 import { PostContent } from './PostContent';
 import { PostTypeBadge } from './PostTypeBadge';
 import { PostActions } from './PostActions';
+import { PostTags } from './PostTags';
 import { PostCardProps } from './types';
 
-export const PostCard: React.FC<PostCardProps> = ({
+const PostCardComponent: React.FC<PostCardProps> = ({
     post,
     currentUserId,
     isLiking = false,
@@ -14,24 +15,41 @@ export const PostCard: React.FC<PostCardProps> = ({
     onComment,
     onShare,
 }) => {
-    // Determine if post is liked
-    const isLiked: boolean = post.isLiked !== undefined
-        ? Boolean(post.isLiked)
-        : Boolean(currentUserId && post.likes?.some((likeId: any) =>
+    // Memoize expensive calculations
+    const isLiked = useMemo(() => {
+        if (post.isLiked !== undefined) {
+            return Boolean(post.isLiked);
+        }
+        if (!currentUserId || !post.likes) return false;
+        return post.likes.some((likeId: any) =>
             likeId?.toString() === currentUserId?.toString()
-        ));
+        );
+    }, [post.isLiked, post.likes, currentUserId]);
 
-    const likesCount = post.likesCount !== undefined
-        ? post.likesCount
-        : (post.likes?.length || 0);
+    const likesCount = useMemo(() =>
+        post.likesCount !== undefined
+            ? post.likesCount
+            : (post.likes?.length || 0),
+        [post.likesCount, post.likes]
+    );
 
-    const commentsCount = post.commentsCount !== undefined
-        ? post.commentsCount
-        : (post.comments?.length || 0);
+    const commentsCount = useMemo(() =>
+        post.commentsCount !== undefined
+            ? post.commentsCount
+            : (post.comments?.length || 0),
+        [post.commentsCount, post.comments]
+    );
 
-    const sharesCount = post.sharesCount !== undefined
-        ? post.sharesCount
-        : (post.shares?.length || 0);
+    const sharesCount = useMemo(() =>
+        post.sharesCount !== undefined
+            ? post.sharesCount
+            : (post.shares?.length || 0),
+        [post.sharesCount, post.shares]
+    );
+
+    const handleLike = useMemo(() => () => onLike(post), [post, onLike]);
+    const handleComment = useMemo(() => () => onComment(post), [post, onComment]);
+    const handleShare = useMemo(() => () => onShare(post), [post, onShare]);
 
     return (
         <View
@@ -54,6 +72,10 @@ export const PostCard: React.FC<PostCardProps> = ({
 
                 <PostContent content={post.content} />
 
+                {post.tags && post.tags.length > 0 && (
+                    <PostTags tags={post.tags} />
+                )}
+
                 <PostTypeBadge postType={post.postType || ''} />
 
                 <PostActions
@@ -62,12 +84,26 @@ export const PostCard: React.FC<PostCardProps> = ({
                     commentsCount={commentsCount}
                     sharesCount={sharesCount}
                     isLiking={isLiking}
-                    onLike={async () => await onLike(post)}
-                    onComment={() => onComment(post)}
-                    onShare={() => onShare(post)}
+                    onLike={handleLike}
+                    onComment={handleComment}
+                    onShare={handleShare}
                 />
             </View>
         </View>
     );
 };
+
+// Memoize component to prevent unnecessary re-renders
+export const PostCard = React.memo(PostCardComponent, (prevProps, nextProps) => {
+    // Only re-render if these props change
+    return (
+        prevProps.post._id === nextProps.post._id &&
+        prevProps.post.isLiked === nextProps.post.isLiked &&
+        prevProps.post.likesCount === nextProps.post.likesCount &&
+        prevProps.post.commentsCount === nextProps.post.commentsCount &&
+        prevProps.post.sharesCount === nextProps.post.sharesCount &&
+        prevProps.currentUserId === nextProps.currentUserId &&
+        prevProps.isLiking === nextProps.isLiking
+    );
+});
 

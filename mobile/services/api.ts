@@ -60,48 +60,77 @@ class ApiService {
       const url = `${this.baseURL}${endpoint}`;
       console.log(`[API] ${options.method || 'GET'} ${url}`);
 
-      const response = await fetch(url, {
-        ...options,
-        headers,
-      });
+      // Add timeout for fetch requests (30 seconds)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 seconds timeout
 
-      let data;
       try {
-        const text = await response.text();
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = {};
-      }
-
-      if (!response.ok) {
-        // Log detailed error for debugging
-        console.error('[API Error Response]', {
-          status: response.status,
-          statusText: response.statusText,
-          data,
-          endpoint,
+        const response = await fetch(url, {
+          ...options,
+          headers,
+          signal: controller.signal,
         });
         
-        // Extract validation errors if present
-        const errors = data.errors || data.error || [];
-        const errorMessage = Array.isArray(errors) 
-          ? errors.map((e: any) => e.msg || e.message || e).join(', ')
-          : (data.message || data.error || `HTTP ${response.status}`);
+        clearTimeout(timeoutId);
+
+        let data;
+        try {
+          const text = await response.text();
+          data = text ? JSON.parse(text) : {};
+        } catch {
+          data = {};
+        }
+
+        if (!response.ok) {
+          // Log detailed error for debugging
+          console.error('[API Error Response]', {
+            status: response.status,
+            statusText: response.statusText,
+            data,
+            endpoint,
+          });
+          
+          // Extract validation errors if present
+          const errors = data.errors || data.error || [];
+          const errorMessage = Array.isArray(errors) 
+            ? errors.map((e: any) => e.msg || e.message || e).join(', ')
+            : (data.message || data.error || `HTTP ${response.status}`);
+          
+          return {
+            success: false,
+            error: errorMessage,
+            message: data.message || errorMessage,
+            data: data.errors || data, // Include full error details for debugging
+          };
+        }
+
+        // Backend trả về { success, data, message } hoặc trực tiếp data
+        return {
+          success: true,
+          data: data.data !== undefined ? data.data : (Array.isArray(data) ? data : data),
+          message: data.message,
+        };
+      } catch (error: any) {
+        clearTimeout(timeoutId);
         
+        // Handle timeout or network errors
+        if (error.name === 'AbortError' || error.message?.includes('timed out')) {
+          console.error('[API Error] Network request timed out');
+          return {
+            success: false,
+            error: 'Network request timed out. Please check your connection and try again.',
+            message: 'Request timeout',
+          };
+        }
+        
+        // Handle other fetch errors
+        console.error('[API Error]', error);
         return {
           success: false,
-          error: errorMessage,
-          message: data.message || errorMessage,
-          data: data.errors || data, // Include full error details for debugging
+          error: error.message || 'Network error. Please check your connection.',
+          message: error.message || 'Network error',
         };
       }
-
-      // Backend trả về { success, data, message } hoặc trực tiếp data
-      return {
-        success: true,
-        data: data.data !== undefined ? data.data : (Array.isArray(data) ? data : data),
-        message: data.message,
-      };
     } catch (error: any) {
       console.error('[API Error]', error);
       return {
@@ -602,6 +631,8 @@ class ApiService {
     conversationId?: string;
     recipientId?: string;
     callType: 'voice' | 'audio' | 'video';
+    isVideoEnabled?: boolean;
+    isAudioEnabled?: boolean;
   }) {
     return this.post(API_ENDPOINTS.calls.initiate, data);
   }
@@ -623,7 +654,29 @@ class ApiService {
   }
 
   async toggleCallMedia(callId: string, mediaType: 'audio' | 'video' | 'screen') {
+    if (mediaType === 'audio') {
+      return this.put(API_ENDPOINTS.calls.toggleAudio(callId), { enabled: true });
+    } else if (mediaType === 'video') {
+      return this.put(API_ENDPOINTS.calls.toggleVideo(callId), { enabled: true });
+    }
+    // Fallback for screen or other types
     return this.put(API_ENDPOINTS.calls.toggleMedia(callId), { mediaType });
+  }
+
+  async toggleCallAudio(callId: string, enabled: boolean) {
+    return this.put(API_ENDPOINTS.calls.toggleAudio(callId), { enabled });
+  }
+
+  async toggleCallVideo(callId: string, enabled: boolean) {
+    return this.put(API_ENDPOINTS.calls.toggleVideo(callId), { enabled });
+  }
+
+  async getCallToken(callId: string) {
+    return this.get(API_ENDPOINTS.calls.token(callId));
+  }
+
+  async rateCall(callId: string, rating: number, feedback?: string) {
+    return this.post(API_ENDPOINTS.calls.rate(callId), { rating, feedback });
   }
 
   async getCallHistory(params?: { limit?: number; page?: number; conversationId?: string }) {

@@ -139,9 +139,23 @@ router.get(
 );
 
 /**
+ * @route   GET /api/v1/calls
+ * @desc    Get call history for user (alias for /calls/history)
+ * @access  Private
+ * NOTE: Must be placed AFTER /history to avoid route conflict
+ */
+router.get(
+  "/",
+  apiRateLimit,
+  validate(validateGetCallHistory),
+  getCallHistory
+);
+
+/**
  * @route   GET /api/v1/calls/:callId
  * @desc    Get call details
  * @access  Private
+ * NOTE: Must be placed AFTER /history and / to avoid route conflict
  */
 router.get(
   "/:callId",

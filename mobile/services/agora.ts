@@ -202,6 +202,23 @@ export async function switchCamera(): Promise<void> {
 }
 
 /**
+ * Set speakerphone on/off
+ */
+export async function setEnableSpeakerphone(enabled: boolean): Promise<void> {
+  if (!rtcEngine) {
+    throw new Error('Agora engine not initialized');
+  }
+
+  try {
+    await rtcEngine.setEnableSpeakerphone(enabled);
+    console.log(`[Agora] Speakerphone ${enabled ? 'enabled' : 'disabled'}`);
+  } catch (error) {
+    console.error('[Agora] Failed to toggle speakerphone:', error);
+    throw error;
+  }
+}
+
+/**
  * Setup local video view
  */
 export async function setupLocalVideo(container: any): Promise<void> {

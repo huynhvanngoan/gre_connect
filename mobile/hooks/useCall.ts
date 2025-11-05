@@ -14,6 +14,7 @@ import {
   destroyAgora,
   registerEventHandlers,
   getAgoraEngine,
+  setEnableSpeakerphone,
 } from '@/services/agora';
 import { useSocket } from './useSocket';
 
@@ -196,9 +197,17 @@ export function useCall(options: UseCallOptions = {}) {
       if (response.success && response.data) {
         // Handle both response.data.call and direct response.data
         const callData = (response.data as any)?.call || response.data;
+        
+        // Ensure callData has _id
+        if (!callData?._id) {
+          console.error('[Call] No call ID in response:', callData);
+          throw new Error('Call ID not found in response');
+        }
+        
+        console.log('[Call] Call initiated successfully:', callData._id);
         setCall(callData);
         
-        // Navigate to call screen
+        // Navigate to call screen immediately
         router.push(`/call/${callData._id}`);
         
         return callData;
@@ -270,13 +279,21 @@ export function useCall(options: UseCallOptions = {}) {
     try {
       await apiService.endCall(call._id, reason);
       await leaveChannel();
+      
+      // Store conversation ID before clearing call
+      const conversationId = call.conversation?._id || call.conversation;
       setCall(null);
       
       if (onCallEnded) {
         onCallEnded();
+      } else {
+        // Fallback: navigate to chat detail if conversation exists
+        if (conversationId) {
+          router.replace(`/messages/${conversationId}`);
+        } else {
+          router.back();
+        }
       }
-      
-      router.back();
     } catch (err: any) {
       setError(err.message);
       Alert.alert('End Call Error', err.message);
@@ -351,6 +368,20 @@ export function useCall(options: UseCallOptions = {}) {
     }
   }, []);
 
+  // Toggle speaker
+  const toggleSpeaker = useCallback(async () => {
+    if (!agoraInitialized.current) return;
+
+    try {
+      const newSpeakerState = !isSpeakerEnabled;
+      await setEnableSpeakerphone(newSpeakerState);
+      setIsSpeakerEnabled(newSpeakerState);
+    } catch (err: any) {
+      console.error('[Call] Failed to toggle speaker:', err);
+      Alert.alert('Error', err.message || 'Failed to toggle speaker');
+    }
+  }, [isSpeakerEnabled]);
+
   return {
     call,
     isLoading,
@@ -367,6 +398,7 @@ export function useCall(options: UseCallOptions = {}) {
     declineCall,
     toggleAudio,
     toggleVideo,
+    toggleSpeaker,
     switchCamera: handleSwitchCamera,
     setLocalVideoRef: (ref: any) => {
       localVideoRef.current = ref;

@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { CALL_STATUS, CALL_TYPES } from "../utils/constants.js";
+import { CALL_STATUS, CALL_TYPES, MESSAGE_TYPES, MESSAGE_STATUS } from "../utils/constants.js";
 
 // ============================================
 // CALL SCHEMA
@@ -329,13 +329,14 @@ callSchema.methods.createCallMessage = async function () {
   await Message.create({
     conversation: this.conversation,
     sender: this.caller,
-    type: "call",
+    type: MESSAGE_TYPES.SYSTEM,
     content,
-    callData: {
+    status: MESSAGE_STATUS.SENT,
+    metadata: {
       callId: this._id,
       callType: this.callType,
       duration: this.duration,
-      status: callStatus,
+      callStatus: callStatus,
     },
   });
 };

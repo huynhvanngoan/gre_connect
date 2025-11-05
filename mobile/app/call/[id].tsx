@@ -7,10 +7,29 @@ import {
     StatusBar,
     Image,
     Alert,
+    Platform,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
+
+// Lazy load expo-av to handle module resolution
+let Audio: any = null;
+const loadAudio = async () => {
+    if (Audio) return Audio;
+    try {
+        const audioModule = await import('expo-av');
+        Audio = audioModule.Audio;
+        return Audio;
+    } catch (error) {
+        console.warn('expo-av not available:', error);
+        return null;
+    }
+};
 import { useCall } from '@/hooks/useCall';
+import { useAuth } from '@clerk/clerk-expo';
+import { useApi } from '@/hooks/useApi';
+import { apiService } from '@/services/api';
 
 // Lazy load RtcSurfaceView to avoid errors when native module is not linked
 // Use a factory function to prevent module loading until actually needed
@@ -58,12 +77,37 @@ async function loadAgoraComponents() {
 
 export default function CallScreen() {
     const { id: callId } = useLocalSearchParams<{ id: string }>();
+    const { userId: clerkUserId } = useAuth();
+
+    // Get current user's database ID
+    const { data: currentUser } = useApi(
+        () => apiService.getCurrentUser(),
+        [],
+        { enabled: !!clerkUserId }
+    );
+    const currentUserId = (currentUser as any)?._id || null;
+
+    // Store conversation ID for navigation after call ends
+    const conversationIdRef = useRef<string | null>(null);
+
+    // Navigate back to chat detail after call ends
+    const handleCallEnded = () => {
+        // Navigate to chat detail if conversation exists, otherwise go back
+        const conversationId = conversationIdRef.current;
+        if (conversationId) {
+            router.replace(`/messages/${conversationId}`);
+        } else {
+            router.back();
+        }
+    };
+
     const {
         call,
         isLoading,
         error,
         isMuted,
         isVideoEnabled,
+        isSpeakerEnabled,
         remoteUsers,
         localVideoRef,
         remoteVideoRefs,
@@ -72,17 +116,139 @@ export default function CallScreen() {
         declineCall,
         toggleAudio,
         toggleVideo,
+        toggleSpeaker,
         switchCamera,
         setLocalVideoRef,
         setRemoteVideoRef,
-    } = useCall({ callId, onCallEnded: () => router.back() });
+    } = useCall({ callId, onCallEnded: handleCallEnded });
+
+    // Update conversation ID ref when call changes
+    useEffect(() => {
+        if (call?.conversation?._id || call?.conversation) {
+            conversationIdRef.current = call.conversation._id || call.conversation;
+        }
+    }, [call]);
 
     const [VideoComponent, setVideoComponent] = useState<any>(null);
     const [isLoadingVideoComponent, setIsLoadingVideoComponent] = useState(true);
+    const ringtoneSound = useRef<any>(null);
 
-    const isCaller = call?.caller?._id === callId; // You'll need to get current user ID
+    // Determine if current user is the caller
+    const isCaller = currentUserId && call?.caller?._id &&
+        call.caller._id.toString() === currentUserId.toString();
     const isVideoCall = call?.callType === 'video';
     const isRinging = call?.status === 'ringing' || call?.status === 'initiated';
+
+    // Get the other participant (not the caller)
+    const otherParticipant = call?.participants?.find((p: any) => {
+        const participantId = p.user?._id?.toString() || p.user?.toString();
+        return participantId && participantId !== currentUserId?.toString() &&
+            participantId !== call?.caller?._id?.toString();
+    });
+    const recipient = otherParticipant?.user || (isCaller ? null : call?.caller);
+
+    // Play ringtone for incoming calls
+    const hapticIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const startHapticPattern = () => {
+            // Clear existing interval
+            if (hapticIntervalRef.current) {
+                clearInterval(hapticIntervalRef.current);
+            }
+            // Vibrate immediately
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            // Then vibrate every 2 seconds
+            hapticIntervalRef.current = setInterval(() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            }, 2000);
+        };
+
+        const stopHapticPattern = () => {
+            if (hapticIntervalRef.current) {
+                clearInterval(hapticIntervalRef.current);
+                hapticIntervalRef.current = null;
+            }
+        };
+
+        const playRingtone = async () => {
+            try {
+                // Try to load Audio module
+                const AudioModule = await loadAudio();
+
+                if (AudioModule) {
+                    // Set audio mode for calls
+                    await AudioModule.setAudioModeAsync({
+                        playsInSilentModeIOS: true,
+                        staysActiveInBackground: true,
+                        shouldDuckAndroid: true,
+                    });
+
+                    // Use system notification sound as ringtone
+                    // For a better ringtone, you can add a local file to assets/sounds/ringtone.mp3
+                    // For now, we'll use a simple approach with a short beep pattern
+                    try {
+                        // Try to use a simple online ringtone
+                        // In production, replace with a local file: require('@/assets/sounds/ringtone.mp3')
+                        const { sound } = await AudioModule.Sound.createAsync(
+                            // Using a simple notification sound URL
+                            // You should replace this with a proper ringtone file
+                            { uri: 'https://notificationsounds.com/storage/sounds/file-sounds-1016-doorbell.mp3' },
+                            {
+                                shouldPlay: true,
+                                isLooping: true,
+                                volume: 1.0,
+                            }
+                        );
+
+                        if (isMounted) {
+                            ringtoneSound.current = sound;
+                        }
+                    } catch (loadError) {
+                        console.warn('Ringtone loading failed, using haptics', loadError);
+                        // Fallback to haptics
+                        startHapticPattern();
+                    }
+                } else {
+                    // Fallback: Use haptics if Audio is not available
+                    startHapticPattern();
+                }
+            } catch (error) {
+                console.warn('Failed to play ringtone:', error);
+                // Fallback: Use haptics
+                startHapticPattern();
+            }
+        };
+
+        const stopRingtone = async () => {
+            try {
+                if (ringtoneSound.current) {
+                    await ringtoneSound.current.stopAsync();
+                    await ringtoneSound.current.unloadAsync();
+                    ringtoneSound.current = null;
+                }
+            } catch (error) {
+                console.warn('Failed to stop ringtone:', error);
+            }
+            stopHapticPattern();
+        };
+
+        // Play ringtone for incoming calls (receiver)
+        if (isRinging && !isCaller && call) {
+            playRingtone();
+        } else {
+            stopRingtone();
+        }
+
+        // Cleanup on unmount
+        return () => {
+            isMounted = false;
+            stopRingtone();
+            stopHapticPattern();
+        };
+    }, [isRinging, isCaller, call]);
 
     // Load Agora video component lazily
     useEffect(() => {
@@ -111,6 +277,21 @@ export default function CallScreen() {
     // Handle incoming call
     const handleAnswer = async () => {
         try {
+            // Stop ringtone/haptics
+            if (ringtoneSound.current) {
+                try {
+                    await ringtoneSound.current.stopAsync();
+                    await ringtoneSound.current.unloadAsync();
+                    ringtoneSound.current = null;
+                } catch (e) {
+                    console.warn('Error stopping ringtone:', e);
+                }
+            }
+            if (hapticIntervalRef.current) {
+                clearInterval(hapticIntervalRef.current);
+                hapticIntervalRef.current = null;
+            }
+
             await joinCall(callId, {
                 video: isVideoCall,
                 audio: true,
@@ -122,8 +303,30 @@ export default function CallScreen() {
 
     const handleDecline = async () => {
         try {
+            // Stop ringtone/haptics
+            if (ringtoneSound.current) {
+                try {
+                    await ringtoneSound.current.stopAsync();
+                    await ringtoneSound.current.unloadAsync();
+                    ringtoneSound.current = null;
+                } catch (e) {
+                    console.warn('Error stopping ringtone:', e);
+                }
+            }
+            if (hapticIntervalRef.current) {
+                clearInterval(hapticIntervalRef.current);
+                hapticIntervalRef.current = null;
+            }
+
+            // Store conversation ID before declining (call may be cleared after decline)
+            const conversationId = conversationIdRef.current;
             await declineCall();
-            router.back();
+            // Navigate to chat detail if conversation exists
+            if (conversationId) {
+                router.replace(`/messages/${conversationId}`);
+            } else {
+                router.back();
+            }
         } catch (err: any) {
             Alert.alert('Error', err.message);
         }
@@ -201,6 +404,7 @@ export default function CallScreen() {
                     <Text style={styles.callType}>
                         {isVideoCall ? 'Video' : 'Voice'} Call
                     </Text>
+                    <Text style={styles.callStatus}>Incoming call...</Text>
 
                     {/* Action buttons */}
                     <View style={styles.actionButtons}>
@@ -220,6 +424,61 @@ export default function CallScreen() {
                                 size={24}
                                 color="#fff"
                             />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </View>
+        );
+    }
+
+    // Outgoing call screen (for caller - waiting for receiver to answer)
+    if (isRinging && isCaller) {
+        return (
+            <View style={styles.container}>
+                <StatusBar barStyle="light-content" />
+
+                {/* Background with blur effect */}
+                <View style={styles.backgroundBlur}>
+                    {recipient?.profilePicture && (
+                        <Image
+                            source={{ uri: recipient.profilePicture }}
+                            style={styles.backgroundImage}
+                            blurRadius={10}
+                        />
+                    )}
+                </View>
+
+                <View style={styles.centerContent}>
+                    {/* Avatar */}
+                    <View style={styles.avatarContainer}>
+                        {recipient?.profilePicture ? (
+                            <Image
+                                source={{ uri: recipient.profilePicture }}
+                                style={styles.avatar}
+                            />
+                        ) : (
+                            <View style={styles.avatarPlaceholder}>
+                                <Feather name="user" size={60} color="#fff" />
+                            </View>
+                        )}
+                    </View>
+
+                    {/* Recipient name */}
+                    <Text style={styles.callerName}>
+                        {recipient?.firstName} {recipient?.lastName}
+                    </Text>
+                    <Text style={styles.callType}>
+                        {isVideoCall ? 'Video' : 'Voice'} Call
+                    </Text>
+                    <Text style={styles.callStatus}>Calling...</Text>
+
+                    {/* Cancel button */}
+                    <View style={styles.actionButtons}>
+                        <TouchableOpacity
+                            style={[styles.actionButton, styles.declineButton]}
+                            onPress={handleEndCall}
+                        >
+                            <Feather name="phone-off" size={24} color="#fff" />
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -288,7 +547,12 @@ export default function CallScreen() {
             {!isVideoCall && (
                 <View style={styles.audioCallContainer}>
                     <View style={styles.avatarContainer}>
-                        {call?.caller?.profilePicture ? (
+                        {recipient?.profilePicture ? (
+                            <Image
+                                source={{ uri: recipient.profilePicture }}
+                                style={styles.avatar}
+                            />
+                        ) : call?.caller?.profilePicture ? (
                             <Image
                                 source={{ uri: call.caller.profilePicture }}
                                 style={styles.avatar}
@@ -300,9 +564,15 @@ export default function CallScreen() {
                         )}
                     </View>
                     <Text style={styles.callerName}>
-                        {call?.caller?.firstName} {call?.caller?.lastName}
+                        {recipient?.firstName && recipient?.lastName
+                            ? `${recipient.firstName} ${recipient.lastName}`
+                            : call?.caller?.firstName && call?.caller?.lastName
+                                ? `${call.caller.firstName} ${call.caller.lastName}`
+                                : 'Call'}
                     </Text>
-                    <Text style={styles.callStatus}>Calling...</Text>
+                    <Text style={styles.callStatus}>
+                        {call?.status === 'ongoing' ? 'Connected' : 'Calling...'}
+                    </Text>
                 </View>
             )}
 
@@ -314,6 +584,16 @@ export default function CallScreen() {
                 >
                     <Feather name={isMuted ? 'mic-off' : 'mic'} size={24} color="#fff" />
                 </TouchableOpacity>
+
+                {/* Speaker button - show for voice calls or video calls */}
+                {!isVideoCall && (
+                    <TouchableOpacity
+                        style={[styles.controlButton, isSpeakerEnabled && styles.controlButtonActive]}
+                        onPress={toggleSpeaker}
+                    >
+                        <Feather name={isSpeakerEnabled ? 'volume-2' : 'volume-x'} size={24} color="#fff" />
+                    </TouchableOpacity>
+                )}
 
                 {isVideoCall && (
                     <>

@@ -32,6 +32,9 @@ const ChatDetailScreen = () => {
         currentUserId,
         handleSendMessage,
         refetchMessages,
+        pendingMessageRef,
+        clearOptimisticMessage,
+        addMessageFromSocket,
     } = useChatDetail(id || '');
     const conversationData = (conversation as any) || {};
     const { getToken } = useAuth();
@@ -47,11 +50,40 @@ const ChatDetailScreen = () => {
             const token = await getToken?.({ skipCache: true });
             if (token) apiService.setAuthToken(token);
 
-            await initiateCall(
-                conversationData.type === 'direct' ? id || undefined : undefined,
-                conversationData.type === 'direct' ? conversationData.participants?.find((p: any) => p.user?._id?.toString() !== currentUserId?.toString())?.user?._id || conversationData.participants?.find((p: any) => p.user?.toString() !== currentUserId?.toString())?.user?.toString() : undefined,
-                'voice'
-            );
+            // For direct calls: use recipientId only
+            // For group/class calls: use conversationId only
+            if (conversationData.type === 'direct') {
+                // Find recipient ID from participants
+                const recipient = conversationData.participants?.find((p: any) => {
+                    const participantId = p.user?._id?.toString() || p.user?.toString();
+                    return participantId && participantId !== currentUserId?.toString();
+                });
+
+                const recipientId = recipient?.user?._id?.toString() || recipient?.user?.toString();
+
+                if (!recipientId) {
+                    Alert.alert('Call Error', 'Could not find recipient');
+                    return;
+                }
+
+                await initiateCall(
+                    undefined, // no conversationId for direct calls
+                    recipientId,
+                    'voice'
+                );
+            } else {
+                // Group or class call: use conversationId
+                if (!id) {
+                    Alert.alert('Call Error', 'Conversation ID is required');
+                    return;
+                }
+
+                await initiateCall(
+                    id,
+                    undefined, // no recipientId for group/class calls
+                    'voice'
+                );
+            }
         } catch (err: any) {
             Alert.alert('Call Error', err.message || 'Failed to initiate voice call');
         }
@@ -62,11 +94,40 @@ const ChatDetailScreen = () => {
             const token = await getToken?.({ skipCache: true });
             if (token) apiService.setAuthToken(token);
 
-            await initiateCall(
-                conversationData.type === 'direct' ? id || undefined : undefined,
-                conversationData.type === 'direct' ? conversationData.participants?.find((p: any) => p.user?._id?.toString() !== currentUserId?.toString())?.user?._id || conversationData.participants?.find((p: any) => p.user?.toString() !== currentUserId?.toString())?.user?.toString() : undefined,
-                'video'
-            );
+            // For direct calls: use recipientId only
+            // For group/class calls: use conversationId only
+            if (conversationData.type === 'direct') {
+                // Find recipient ID from participants
+                const recipient = conversationData.participants?.find((p: any) => {
+                    const participantId = p.user?._id?.toString() || p.user?.toString();
+                    return participantId && participantId !== currentUserId?.toString();
+                });
+
+                const recipientId = recipient?.user?._id?.toString() || recipient?.user?.toString();
+
+                if (!recipientId) {
+                    Alert.alert('Call Error', 'Could not find recipient');
+                    return;
+                }
+
+                await initiateCall(
+                    undefined, // no conversationId for direct calls
+                    recipientId,
+                    'video'
+                );
+            } else {
+                // Group or class call: use conversationId
+                if (!id) {
+                    Alert.alert('Call Error', 'Conversation ID is required');
+                    return;
+                }
+
+                await initiateCall(
+                    id,
+                    undefined, // no recipientId for group/class calls
+                    'video'
+                );
+            }
         } catch (err: any) {
             Alert.alert('Call Error', err.message || 'Failed to initiate video call');
         }
@@ -173,7 +234,8 @@ const ChatDetailScreen = () => {
         if (!socket) return;
         const onNewMessage = (message: any) => {
             if (message?.conversation?.toString?.() === (id || '')) {
-                refetchMessages();
+                // Use optimized handler that checks if message already exists
+                addMessageFromSocket(message);
                 setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 50);
             }
         };
@@ -181,7 +243,7 @@ const ChatDetailScreen = () => {
         return () => {
             socket.off('new-message', onNewMessage);
         };
-    }, [socket, id, refetchMessages]);
+    }, [socket, id, addMessageFromSocket]);
 
     // Realtime: listen typing indicators
     React.useEffect(() => {

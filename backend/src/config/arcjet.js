@@ -134,13 +134,14 @@ export const strictRateLimiter = aj.withRule(
 
 /**
  * Rate limiting cho call/video call
- * 10 calls per hour
+ * 50 calls per hour (increased for better UX)
+ * Note: This is bypassed completely in development via middleware
  */
 export const callRateLimiter = aj.withRule(
   fixedWindow({
-    mode: "LIVE",
+    mode: "LIVE", // Always LIVE since we bypass in middleware
     window: "1h",
-    max: 10,
+    max: 50, // Increased from 10 to 50
   })
 );
 
@@ -246,7 +247,7 @@ export const getUserIdentifier = (req) => {
   if (req.user?._id) {
     return `user:${req.user._id}`;
   }
-  
+
   // Fallback to IP address
   const ip = req.ip || req.connection.remoteAddress;
   return `ip:${ip}`;

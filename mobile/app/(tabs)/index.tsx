@@ -1,4 +1,4 @@
-import { View, ScrollView, RefreshControl } from 'react-native'
+import { View, FlatList, RefreshControl, ListRenderItem } from 'react-native'
 import React, { useState, useCallback } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -153,30 +153,35 @@ const HomeScreen = () => {
             ) : error ? (
                 <ErrorMessage message={error} onRetry={refetch} />
             ) : (
-                <ScrollView
-                    className='flex-1'
-                    contentContainerStyle={{ paddingBottom: 16 }}
+                <FlatList
+                    data={localPosts.length > 0 ? localPosts : []}
+                    keyExtractor={(item) => item._id || `post-${Math.random()}`}
+                    renderItem={({ item }) => (
+                        <PostCard
+                            post={item}
+                            currentUserId={currentUserId}
+                            isLiking={likingPosts[item._id?.toString() || ''] || false}
+                            onLike={handleLikePost}
+                            onComment={handleCommentPost}
+                            onShare={handleSharePost}
+                        />
+                    )}
+                    ListEmptyComponent={<PostEmptyState />}
                     refreshControl={
                         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
                     }
+                    contentContainerStyle={{ paddingBottom: 16 }}
                     showsVerticalScrollIndicator={false}
-                >
-                    {Array.isArray(localPosts) && localPosts.length > 0 ? (
-                        localPosts.map((post: Post, index: number) => (
-                            <PostCard
-                                key={post._id || index}
-                                post={post}
-                                currentUserId={currentUserId}
-                                isLiking={likingPosts[post._id?.toString() || ''] || false}
-                                onLike={handleLikePost}
-                                onComment={handleCommentPost}
-                                onShare={handleSharePost}
-                            />
-                        ))
-                    ) : (
-                        <PostEmptyState />
-                    )}
-                </ScrollView>
+                    initialNumToRender={10}
+                    maxToRenderPerBatch={5}
+                    windowSize={5}
+                    removeClippedSubviews={true}
+                    getItemLayout={(data, index) => ({
+                        length: 200,
+                        offset: 200 * index,
+                        index,
+                    })}
+                />
             )}
         </SafeAreaView>
     )

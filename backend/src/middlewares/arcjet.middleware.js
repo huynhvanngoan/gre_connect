@@ -202,12 +202,21 @@ export const strictRateLimit = createArcjetMiddleware(strictRateLimiter, {
 
 /**
  * Call rate limiting
- * 10 calls per hour
+ * 50 calls per hour (increased for better UX)
+ * In development, this is bypassed completely
  */
-export const callRateLimit = createArcjetMiddleware(callRateLimiter, {
-  errorMessage: "Too many calls. Please try again later.",
-  errorStatus: 429,
-});
+export const callRateLimit = (req, res, next) => {
+  // Bypass completely in development
+  if (process.env.NODE_ENV !== "production") {
+    return next();
+  }
+
+  // Apply rate limiting in production
+  return createArcjetMiddleware(callRateLimiter, {
+    errorMessage: "Too many calls. Please try again later.",
+    errorStatus: 429,
+  })(req, res, next);
+};
 
 // ============================================
 // CUSTOM RATE LIMIT MIDDLEWARE

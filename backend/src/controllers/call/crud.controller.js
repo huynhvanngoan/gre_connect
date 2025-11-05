@@ -7,6 +7,7 @@ import { successResponse } from "../../utils/response.js";
 import { HTTP_STATUS, CALL_TYPES, CALL_STATUS, NOTIFICATION_TYPES } from "../../utils/constants.js";
 import { getIO } from "../../config/socket.js";
 import { generateRtcToken, generateChannelName, getAgoraAppId } from "../../services/agora.service.js";
+import { logger } from "../../utils/logger.js";
 
 /**
  * @desc    Initiate a new call (voice or video)
@@ -47,19 +48,34 @@ export const initiateCall = asyncHandler(async (req, res) => {
         }
 
         // Check if user is participant
-        if (!conversation.isParticipant(userId)) {
+        // For direct calls, we don't need this check since we already created/found the conversation
+        // But for group/class calls, we need to verify
+        const isParticipant = conversation.isParticipant(userId);
+
+        if (!isParticipant) {
+            logger.warn("User attempted to call non-participant conversation", {
+                userId: userId.toString(),
+                conversationId: conversationId.toString(),
+                conversationType: conversation.type,
+                participants: conversation.participants.map(p => ({
+                    user: p.user?.toString(),
+                    status: p.status,
+                })),
+            });
             res.status(HTTP_STATUS.FORBIDDEN);
             throw new Error("You are not a participant in this conversation");
         }
 
-        // Check if calls are allowed
-        if (!conversation.settings.allowCalls) {
+        // Check if calls are allowed (default to true if settings not set)
+        if (conversation.settings && conversation.settings.allowCalls === false) {
             res.status(HTTP_STATUS.FORBIDDEN);
             throw new Error("Calls are not allowed in this conversation");
         }
 
         // Add all conversation participants
-        participants = conversation.participants.map(p => p.user);
+        participants = conversation.participants
+            .filter(p => p.status === "active")
+            .map(p => p.user);
     }
 
     // Generate Agora channel name
@@ -70,9 +86,10 @@ export const initiateCall = asyncHandler(async (req, res) => {
         caller: userId,
         conversation: conversation._id,
         callType,
+        // Participant status must respect model enum: ["waiting", "joined", "left", "declined"]
         participants: participants.map(id => ({
             user: id,
-            status: id.equals(userId) ? "connected" : "ringing",
+            status: id.equals(userId) ? "joined" : "waiting",
             joinedAt: id.equals(userId) ? new Date() : null,
         })),
         status: CALL_STATUS.RINGING,
@@ -112,15 +129,27 @@ export const initiateCall = asyncHandler(async (req, res) => {
                 },
             });
 
-            // Create notification
+            // Create notification (non-blocking - don't fail call if notification fails)
+            const callerName = req.user?.fullName ||
+                `${req.user?.firstName || ''} ${req.user?.lastName || ''}`.trim() ||
+                req.user?.username ||
+                'Someone';
+
             Notification.createNotification({
                 recipientId: participantId,
                 senderId: userId,
-                type: NOTIFICATION_TYPES.CALL_INCOMING,
+                type: NOTIFICATION_TYPES.INCOMING_CALL,
                 title: "Incoming Call",
-                message: `${req.user.fullName} is calling you`,
+                message: `${callerName} is calling you`,
                 actionUrl: `/calls/${call._id}`,
                 channels: { inApp: true, push: true },
+            }).catch((err) => {
+                // Log error but don't fail the call
+                logger.error("Failed to create call notification", {
+                    error: err.message,
+                    callId: call._id,
+                    recipientId: participantId,
+                });
             });
         }
     });
@@ -337,15 +366,20 @@ export const declineCall = asyncHandler(async (req, res) => {
         },
     });
 
-    // Create notification for caller
-    await Notification.createNotification({
+    // Create notification for caller (non-blocking)
+    Notification.createNotification({
         recipientId: call.caller._id,
         senderId: userId,
-        type: NOTIFICATION_TYPES.CALL_MISSED,
+        type: NOTIFICATION_TYPES.MISSED_CALL,
         title: "Call Declined",
-        message: `${req.user.fullName} declined your call`,
+        message: `${req.user?.fullName || `${req.user?.firstName || ''} ${req.user?.lastName || ''}`.trim() || req.user?.username || 'Someone'} declined your call`,
         actionUrl: `/calls/${call._id}`,
         channels: { inApp: true, push: false },
+    }).catch((err) => {
+        logger.error("Failed to create declined call notification", {
+            error: err.message,
+            callId: call._id,
+        });
     });
 
     successResponse(res, HTTP_STATUS.OK, "Call declined successfully");

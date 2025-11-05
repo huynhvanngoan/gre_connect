@@ -1,11 +1,38 @@
 // Agora.io Service Wrapper for React Native
-import { createAgoraRtcEngine } from 'react-native-agora';
+// Lazy import to avoid errors when native module is not linked
+let createAgoraRtcEngine: any = null;
 
 let rtcEngine: any = null;
 let agoraAppId: string | null = null;
 
 // Event handlers
 let eventHandlers: any = {};
+
+/**
+ * Lazy load Agora module
+ */
+async function loadAgoraModule() {
+  if (createAgoraRtcEngine) {
+    return createAgoraRtcEngine;
+  }
+
+  try {
+    // Use dynamic import with try-catch to handle linking errors gracefully
+    const agoraModule = await import('react-native-agora');
+    createAgoraRtcEngine = agoraModule.createAgoraRtcEngine;
+    return createAgoraRtcEngine;
+  } catch (error: any) {
+    const errorMsg = error?.message || String(error);
+    console.warn('[Agora] Native module not available:', {
+      error: errorMsg,
+      hint: 'This is expected if native module is not linked. App will work without Agora features.',
+    });
+    
+    // Don't throw - return null to allow graceful degradation
+    // The calling code should handle null gracefully
+    return null;
+  }
+}
 
 /**
  * Initialize Agora RTC Engine
@@ -20,8 +47,15 @@ export async function initAgora(appId: string): Promise<any> {
   }
 
   try {
+    // Lazy load the module
+    const createEngine = await loadAgoraModule();
+    
+    if (!createEngine) {
+      throw new Error('Agora native module is not available. Please ensure the app is built with native dependencies.');
+    }
+    
     // For react-native-agora v4.x
-    rtcEngine = createAgoraRtcEngine();
+    rtcEngine = createEngine();
     await rtcEngine.initialize({ appId: appId });
     agoraAppId = appId;
 

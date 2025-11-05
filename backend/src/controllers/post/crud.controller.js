@@ -6,6 +6,7 @@ import { HTTP_STATUS, POST_STATUS, POST_TYPES, VISIBILITY_TYPES, PERMISSIONS } f
 import { getIO } from "../../config/socket.js";
 import { buildVisibilityQuery, canViewPost, canEditPost, canDeletePost } from "./helpers.js";
 import { sendPostNotifications } from "./helpers.js";
+import { logger } from "../../utils/logger.js";
 
 /**
  * @desc    Create a new post
@@ -185,7 +186,7 @@ export const getPosts = asyncHandler(async (req, res) => {
     }
 
     // Apply visibility rules based on user role
-    if (req.user) {
+    if (req.user && req.user._id) {
         const visibilityQuery = buildVisibilityQuery(req.user);
         Object.assign(query, visibilityQuery);
     } else {
@@ -208,13 +209,17 @@ export const getPosts = asyncHandler(async (req, res) => {
     // Compute accurate commentsCount via aggregation
     const postIds = posts.map(p => p._id);
     let commentsCountMap = {};
-    try {
-        const counts = await Comment.aggregate([
-            { $match: { post: { $in: postIds } } },
-            { $group: { _id: "$post", count: { $sum: 1 } } },
-        ]);
-        commentsCountMap = counts.reduce((acc, cur) => { acc[cur._id.toString()] = cur.count; return acc; }, {});
-    } catch { }
+    if (postIds.length > 0) {
+        try {
+            const counts = await Comment.aggregate([
+                { $match: { post: { $in: postIds } } },
+                { $group: { _id: "$post", count: { $sum: 1 } } },
+            ]);
+            commentsCountMap = counts.reduce((acc, cur) => { acc[cur._id.toString()] = cur.count; return acc; }, {});
+        } catch (error) {
+            logger.error("Error computing comments count", { error: error.message });
+        }
+    }
 
     // Add virtual fields
     const postsWithVirtuals = posts.map(post => ({
@@ -222,7 +227,7 @@ export const getPosts = asyncHandler(async (req, res) => {
         likesCount: typeof post.likesCount === 'number' ? post.likesCount : (post.likes?.length || 0),
         commentsCount: (commentsCountMap[post._id.toString()] ?? (typeof post.commentsCount === 'number' ? post.commentsCount : (post.comments?.length || 0))),
         sharesCount: typeof post.sharesCount === 'number' ? post.sharesCount : (post.shares?.length || 0),
-        isLiked: req.user ? (post.likes?.some?.(id => id.toString() === req.user._id.toString()) || false) : false,
+        isLiked: req.user && req.user._id ? (post.likes?.some?.(id => id.toString() === req.user._id.toString()) || false) : false,
     }));
 
     successResponse(res, HTTP_STATUS.OK, "Posts retrieved successfully", {

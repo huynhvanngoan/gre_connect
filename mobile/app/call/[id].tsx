@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     View,
     Text,
@@ -11,7 +11,50 @@ import {
 import { useLocalSearchParams, router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useCall } from '@/hooks/useCall';
-import { RtcSurfaceView } from 'react-native-agora';
+
+// Lazy load RtcSurfaceView to avoid errors when native module is not linked
+// Use a factory function to prevent module loading until actually needed
+let RtcSurfaceView: any = null;
+let AgoraComponentsLoaded = false;
+let AgoraLoadError: any = null;
+let loadPromise: Promise<any> | null = null;
+
+async function loadAgoraComponents() {
+    // If already tried and failed, don't try again
+    if (AgoraLoadError) {
+        return null;
+    }
+
+    // If already loaded, return it
+    if (AgoraComponentsLoaded && RtcSurfaceView) {
+        return RtcSurfaceView;
+    }
+
+    // If a load is in progress, wait for it
+    if (loadPromise) {
+        return loadPromise;
+    }
+
+    // Start loading
+    loadPromise = (async () => {
+        try {
+            // Use dynamic import - this will only execute when called
+            const agoraModule = await import('react-native-agora');
+            RtcSurfaceView = agoraModule.RtcSurfaceView;
+            AgoraComponentsLoaded = true;
+            return RtcSurfaceView;
+        } catch (error: any) {
+            console.warn('[Call] Agora components not available:', error?.message || error);
+            AgoraLoadError = error;
+            // Return null to use fallback UI
+            return null;
+        } finally {
+            loadPromise = null;
+        }
+    })();
+
+    return loadPromise;
+}
 
 export default function CallScreen() {
     const { id: callId } = useLocalSearchParams<{ id: string }>();
@@ -34,9 +77,26 @@ export default function CallScreen() {
         setRemoteVideoRef,
     } = useCall({ callId, onCallEnded: () => router.back() });
 
+    const [VideoComponent, setVideoComponent] = useState<any>(null);
+    const [isLoadingVideoComponent, setIsLoadingVideoComponent] = useState(true);
+
     const isCaller = call?.caller?._id === callId; // You'll need to get current user ID
     const isVideoCall = call?.callType === 'video';
     const isRinging = call?.status === 'ringing' || call?.status === 'initiated';
+
+    // Load Agora video component lazily
+    useEffect(() => {
+        if (isVideoCall && !VideoComponent) {
+            loadAgoraComponents().then((Component) => {
+                setVideoComponent(Component);
+                setIsLoadingVideoComponent(false);
+            }).catch(() => {
+                setIsLoadingVideoComponent(false);
+            });
+        } else if (!isVideoCall) {
+            setIsLoadingVideoComponent(false);
+        }
+    }, [isVideoCall, VideoComponent]);
 
     // Auto-join call when screen loads (only for caller)
     useEffect(() => {
@@ -175,18 +235,28 @@ export default function CallScreen() {
             {/* Remote video views */}
             {isVideoCall && (
                 <View style={styles.videoContainer}>
-                    {remoteUsers.map((remote) => {
-                        const uid = typeof remote.uid === 'string' ? parseInt(remote.uid, 10) : remote.uid;
-                        return (
-                            <View key={remote.uid} style={styles.remoteVideoWrapper}>
-                                <RtcSurfaceView
-                                    canvas={{ uid: isNaN(uid) ? 0 : uid }}
-                                    style={styles.remoteVideo}
-                                    ref={(ref) => setRemoteVideoRef(remote.uid, ref)}
-                                />
-                            </View>
-                        );
-                    })}
+                    {isLoadingVideoComponent ? (
+                        <View style={styles.remoteVideoPlaceholder}>
+                            <Text style={styles.remoteVideoPlaceholderText}>Loading video...</Text>
+                        </View>
+                    ) : VideoComponent ? (
+                        remoteUsers.map((remote) => {
+                            const uid = typeof remote.uid === 'string' ? parseInt(remote.uid, 10) : remote.uid;
+                            return (
+                                <View key={remote.uid} style={styles.remoteVideoWrapper}>
+                                    <VideoComponent
+                                        canvas={{ uid: isNaN(uid) ? 0 : uid }}
+                                        style={styles.remoteVideo}
+                                        ref={(ref: any) => setRemoteVideoRef(remote.uid, ref)}
+                                    />
+                                </View>
+                            );
+                        })
+                    ) : (
+                        <View style={styles.remoteVideoPlaceholder}>
+                            <Text style={styles.remoteVideoPlaceholderText}>Video not available</Text>
+                        </View>
+                    )}
 
                     {/* Fallback when no remote video */}
                     {remoteUsers.length === 0 && (
@@ -204,9 +274,9 @@ export default function CallScreen() {
             )}
 
             {/* Local video (picture-in-picture) */}
-            {isVideoCall && isVideoEnabled && (
+            {isVideoCall && isVideoEnabled && VideoComponent && (
                 <View style={styles.localVideoContainer}>
-                    <RtcSurfaceView
+                    <VideoComponent
                         canvas={{ uid: 0 }}
                         style={styles.localVideo}
                         ref={setLocalVideoRef}

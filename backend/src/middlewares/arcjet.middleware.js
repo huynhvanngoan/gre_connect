@@ -137,6 +137,14 @@ export const apiRateLimit = createArcjetMiddleware(apiRateLimiter, {
   errorStatus: 429,
 });
 
+// Bypass Arcjet in development for easier testing
+export const apiRateLimitDev = (req, res, next) => {
+  if (process.env.NODE_ENV !== "production") {
+    return next();
+  }
+  return apiRateLimit(req, res, next);
+};
+
 /**
  * Authentication rate limiting
  * 5 requests per 15 minutes

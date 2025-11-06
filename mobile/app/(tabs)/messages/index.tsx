@@ -62,11 +62,16 @@ const MessagesScreen = () => {
     const onMessagesReadAll = () => {
       activeData.refetch?.();
     };
+    const onConversationUpdated = () => {
+      activeData.refetch?.();
+    };
     socket.on('message-notification', onMessageNotification);
     socket.on('messages-read-all', onMessagesReadAll);
+    socket.on('conversation-updated', onConversationUpdated);
     return () => {
       socket.off('message-notification', onMessageNotification);
       socket.off('messages-read-all', onMessagesReadAll);
+      socket.off('conversation-updated', onConversationUpdated);
     };
   }, [socket, activeData]);
 

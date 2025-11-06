@@ -27,7 +27,14 @@ export const getUserConversations = asyncHandler(async (req, res) => {
     // Find participant entry for current user to check archived status
     const conversations = await Conversation.find(query)
         .populate("participants.user", "firstName lastName username profilePicture role isOnline lastSeen")
-        .populate({ path: "lastMessage", select: "content type createdAt media" })
+        .populate({
+            path: "lastMessage",
+            select: "content type createdAt media metadata",
+            populate: {
+                path: "sender",
+                select: "firstName lastName username profilePicture"
+            }
+        })
         .populate("createdBy", "firstName lastName username")
         .populate("classId", "name code coverImage")
         .sort({ lastMessageAt: -1, updatedAt: -1 })
@@ -46,25 +53,44 @@ export const getUserConversations = asyncHandler(async (req, res) => {
     // Add unread count for each conversation
     const conversationsWithUnread = await Promise.all(
         filteredConversations.map(async (conv) => {
-            const unreadCount = await conv.getUnreadCount(req.user._id);
-            let lastMessage = conv.lastMessage;
-            // Ensure lastMessage matches lastMessageAt
             try {
+                const unreadCount = await conv.getUnreadCount(req.user._id);
+                let lastMessage = conv.lastMessage;
+
+                // Ensure lastMessage matches lastMessageAt
                 if (!lastMessage || (conv.lastMessageAt && lastMessage.createdAt && new Date(lastMessage.createdAt).getTime() !== new Date(conv.lastMessageAt).getTime())) {
-                    lastMessage = await Message
-                        .findOne({ conversation: conv._id })
-                        .sort({ createdAt: -1 });
+                    try {
+                        lastMessage = await Message
+                            .findOne({ conversation: conv._id })
+                            .sort({ createdAt: -1 })
+                            .select("content type createdAt media metadata")
+                            .populate("sender", "firstName lastName username profilePicture")
+                            .lean();
+                    } catch (err) {
+                        // If query fails, keep existing lastMessage
+                        console.warn("Error fetching lastMessage:", err);
+                    }
                 }
-            } catch { }
-            const convObj = conv.toObject();
-            convObj.lastMessage = lastMessage || convObj.lastMessage;
-            if (lastMessage?.createdAt) {
-                convObj.lastMessageAt = lastMessage.createdAt;
+
+                const convObj = conv.toObject();
+                convObj.lastMessage = lastMessage || convObj.lastMessage;
+                if (lastMessage?.createdAt) {
+                    convObj.lastMessageAt = lastMessage.createdAt;
+                }
+                return {
+                    ...convObj,
+                    unreadCount,
+                };
+            } catch (err) {
+                // If any error occurs, return basic conversation data
+                console.error("Error processing conversation:", err);
+                const convObj = conv.toObject();
+                return {
+                    ...convObj,
+                    unreadCount: 0,
+                    lastMessage: convObj.lastMessage || null,
+                };
             }
-            return {
-                ...convObj,
-                unreadCount,
-            };
         })
     );
 

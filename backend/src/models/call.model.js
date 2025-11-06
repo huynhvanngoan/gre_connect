@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { CALL_STATUS, CALL_TYPES, MESSAGE_TYPES, MESSAGE_STATUS } from "../utils/constants.js";
+import { getIO } from "../config/socket.js";
 
 // ============================================
 // CALL SCHEMA
@@ -317,6 +318,7 @@ callSchema.methods.updateQualityMetrics = async function (metrics) {
 
 callSchema.methods.createCallMessage = async function () {
   const Message = mongoose.model("Message");
+  const Conversation = mongoose.model("Conversation");
 
   const callStatus = this.duration > 0 ? "completed" :
     this.status === CALL_STATUS.MISSED ? "missed" :
@@ -326,7 +328,7 @@ callSchema.methods.createCallMessage = async function () {
   const content = `${this.callType === CALL_TYPES.VIDEO ? "Video" : "Voice"} call ${callStatus}${this.duration > 0 ? ` - ${this.durationFormatted}` : ""
     }`;
 
-  await Message.create({
+  const message = await Message.create({
     conversation: this.conversation,
     sender: this.caller,
     type: MESSAGE_TYPES.SYSTEM,
@@ -339,6 +341,39 @@ callSchema.methods.createCallMessage = async function () {
       callStatus: callStatus,
     },
   });
+
+  // Update conversation's last message
+  const conversation = await Conversation.findById(this.conversation).populate("participants.user", "_id");
+  if (conversation) {
+    conversation.lastMessage = message._id;
+    conversation.lastMessageAt = message.createdAt;
+    await conversation.save();
+
+    // Emit socket event to notify participants that conversation was updated
+    const io = getIO();
+    if (io) {
+      // Emit to conversation room and all participants
+      io.to(`conversation-${conversation._id}`).emit("conversation-updated", {
+        conversationId: conversation._id,
+        lastMessage: message,
+        lastMessageAt: message.createdAt,
+      });
+
+      // Also emit to individual participants as fallback
+      conversation.participants.forEach(participant => {
+        const userId = participant.user?._id || participant.user;
+        if (userId) {
+          io.to(userId.toString()).emit("conversation-updated", {
+            conversationId: conversation._id,
+            lastMessage: message,
+            lastMessageAt: message.createdAt,
+          });
+        }
+      });
+    }
+  }
+
+  return message;
 };
 
 // Static methods

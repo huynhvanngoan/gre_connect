@@ -31,35 +31,47 @@ async function clearClerkSecureStore() {
   }
 }
 
-// Component to handle auto-logout when app is opened
+// Component to handle auto-logout when token expires (30 minutes)
 function AuthStateHandler() {
-  const { isSignedIn, signOut } = useAuth();
+  const { isSignedIn, signOut, getToken } = useAuth();
   const appState = useRef(AppState.currentState);
-  const appStartTime = useRef(Date.now());
   const isInitialMount = useRef(true);
+  const lastCheckTime = useRef<number | null>(null);
+
+  // Check if token is expired (more than 30 minutes)
+  const checkTokenExpiry = async () => {
+    try {
+      // Try to get token - if it's expired, getToken will return null
+      const token = await getToken?.({ skipCache: false });
+      
+      if (!token && isSignedIn) {
+        // Token expired, sign out
+        await clearClerkSecureStore();
+        await signOut();
+      } else {
+        // Update last check time
+        lastCheckTime.current = Date.now();
+      }
+    } catch (error) {
+      console.warn('Error checking token expiry:', error);
+    }
+  };
 
   useEffect(() => {
-    // Only clear SecureStore on initial app start (first mount)
-    if (isInitialMount.current) {
+    // Check token expiry on initial mount
+    if (isInitialMount.current && isSignedIn) {
       isInitialMount.current = false;
-      clearClerkSecureStore();
+      checkTokenExpiry();
     }
 
-    // Handle app state changes - only sign out when app comes back from background/killed
+    // Handle app state changes - check token expiry when app comes back from background
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
-      // Only sign out when app transitions from background/inactive to active
-      // AND app was in background for more than 1 second (to avoid sign out during normal app switching)
       const wasInBackground = appState.current.match(/inactive|background/);
       const isNowActive = nextAppState === 'active';
 
+      // When app becomes active from background, check if token is still valid
       if (wasInBackground && isNowActive && isSignedIn) {
-        // App was reopened from background/killed state - clear and sign out
-        // This ensures user must login again when they reopen the app
-        clearClerkSecureStore().then(() => {
-          signOut().catch((err) => {
-            console.warn('Auto-signout on app resume:', err);
-          });
-        });
+        checkTokenExpiry();
       }
 
       appState.current = nextAppState;
@@ -68,7 +80,7 @@ function AuthStateHandler() {
     return () => {
       subscription.remove();
     };
-  }, [isSignedIn, signOut]);
+  }, [isSignedIn, signOut, getToken]);
 
   return null;
 }

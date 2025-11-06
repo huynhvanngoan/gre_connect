@@ -33,7 +33,7 @@ import {
 } from "../validations/conversation.validation.js";
 
 import { requireAuth } from "../middlewares/auth.middleware.js";
-import { apiRateLimit } from "../middlewares/arcjet.middleware.js";
+import { apiRateLimit, apiRateLimitDev } from "../middlewares/arcjet.middleware.js";
 import { validate } from "../middlewares/validation.middleware.js";
 
 const router = express.Router();
@@ -43,7 +43,7 @@ const router = express.Router();
 // ============================================
 
 router.use(requireAuth);
-router.use(apiRateLimit);
+router.use(apiRateLimitDev);
 
 // ============================================
 // GET ROUTES

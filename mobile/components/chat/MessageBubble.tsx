@@ -11,6 +11,9 @@ interface MessageBubbleProps {
     isTimeVisible: boolean;
     onToggleTime: () => void;
     currentUserId: string | null;
+    conversationId?: string;
+    conversationType?: 'direct' | 'group' | 'class';
+    onCallPress?: (callType: 'voice' | 'video', conversationId?: string, recipientId?: string) => void;
 }
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({
@@ -21,13 +24,43 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     isTimeVisible,
     onToggleTime,
     currentUserId,
+    conversationId,
+    conversationType,
+    onCallPress,
 }) => {
     // Check if this is a call/system message
-    const isCallMessage = message.type === 'system' && message.metadata?.callId;
-    const callMetadata = message.metadata;
-    const callType = callMetadata?.callType || 'voice';
-    const callStatus = callMetadata?.callStatus || 'completed';
-    const duration = callMetadata?.duration || 0;
+    // Fallback: detect from content if metadata is missing
+    const isCallMessage = message.type === 'system' && (
+        message.metadata?.callId ||
+        (message.content && /(voice|video)\s+call\s+(completed|missed|declined|cancelled)/i.test(message.content))
+    );
+
+    const callMetadata = message.metadata || {};
+
+    // Extract call info from metadata or content
+    let callType = callMetadata?.callType;
+    let callStatus = callMetadata?.callStatus;
+    let duration = callMetadata?.duration || 0;
+
+    // If metadata is missing, try to parse from content
+    if (!callType && message.content) {
+        const contentLower = message.content.toLowerCase();
+        callType = contentLower.includes('video') ? 'video' : 'voice';
+    }
+
+    // Default values
+    callType = callType || 'voice';
+    callStatus = callStatus || 'completed';
+
+    // Extract duration from content if not in metadata
+    if (!duration && message.content) {
+        const durationMatch = message.content.match(/(\d{1,2}):(\d{2})/);
+        if (durationMatch) {
+            const minutes = parseInt(durationMatch[1], 10);
+            const seconds = parseInt(durationMatch[2], 10);
+            duration = minutes * 60 + seconds;
+        }
+    }
 
     // Format duration
     const formatDuration = (seconds: number) => {
@@ -87,97 +120,161 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
             {/* Call Message - Special styling */}
             {isCallMessage ? (
-                <View className='items-center my-3'>
-                    <TouchableOpacity
-                        onPress={onToggleTime}
-                        activeOpacity={0.8}
-                        style={{
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            backgroundColor: '#F9FAFB',
-                            paddingHorizontal: 20,
-                            paddingVertical: 12,
-                            borderRadius: 24,
-                            borderWidth: 1,
-                            borderColor: '#E5E7EB',
-                            shadowColor: '#000',
-                            shadowOffset: { width: 0, height: 1 },
-                            shadowOpacity: 0.05,
-                            shadowRadius: 3,
-                            elevation: 2,
-                            minWidth: 200,
-                            maxWidth: '85%',
-                        }}
-                    >
-                        {/* Call Icon */}
-                        <View
+                <View
+                    className={`flex-row mb-2 ${isMe ? 'justify-end' : 'justify-start'}`}
+                >
+                    {!isMe && (
+                        <View className='mr-2'>
+                            {showAvatar ? (
+                                message.sender?.profilePicture ? (
+                                    <ExpoImage
+                                        source={{ uri: message.sender.profilePicture }}
+                                        style={{ width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: '#E5E7EB' }}
+                                        contentFit="cover"
+                                        cachePolicy="memory-disk"
+                                        transition={200}
+                                    />
+                                ) : (
+                                    <View
+                                        className='size-9 rounded-full items-center justify-center'
+                                        style={{
+                                            backgroundColor: '#F3F4F6',
+                                            borderWidth: 2,
+                                            borderColor: '#E5E7EB',
+                                        }}
+                                    >
+                                        <Feather name='user' size={16} color="#6B7280" />
+                                    </View>
+                                )
+                            ) : (
+                                <View className='size-9' />
+                            )}
+                        </View>
+                    )}
+
+                    <View className={`max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`} style={{ flexShrink: 1 }}>
+                        {/* Sender Name */}
+                        {!isMe && (
+                            <Text className='text-xs text-gray-500 mb-1.5 px-2 font-medium'>
+                                {message.sender?.firstName} {message.sender?.lastName || message.sender?.username || 'Unknown'}
+                            </Text>
+                        )}
+
+                        <TouchableOpacity
+                            onPress={() => {
+                                // If call message and onCallPress is provided, handle call
+                                if (isCallMessage && onCallPress) {
+                                    onCallPress(callType as 'voice' | 'video', conversationId);
+                                } else {
+                                    onToggleTime();
+                                }
+                            }}
+                            activeOpacity={isCallMessage && onCallPress ? 0.7 : 0.85}
                             style={{
-                                width: 40,
-                                height: 40,
-                                borderRadius: 20,
-                                backgroundColor: statusInfo.color + '15',
+                                flexDirection: 'row',
                                 alignItems: 'center',
-                                justifyContent: 'center',
-                                marginRight: 12,
+                                backgroundColor: '#FFFFFF',
+                                paddingHorizontal: 16,
+                                paddingVertical: 14,
+                                borderRadius: 16,
+                                borderWidth: 1.5,
+                                borderColor: statusInfo.color + '30',
+                                shadowColor: '#000',
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowOpacity: 0.08,
+                                shadowRadius: 4,
+                                elevation: 3,
+                                minWidth: 200,
+                                maxWidth: '100%',
                             }}
                         >
-                            <Feather
-                                name={callType === 'video' ? 'video' : statusInfo.icon as any}
-                                size={20}
-                                color={statusInfo.color}
-                            />
-                        </View>
-
-                        {/* Call Info */}
-                        <View style={{ flex: 1 }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-                                <Text
-                                    style={{
-                                        fontSize: 14,
-                                        fontWeight: '600',
-                                        color: '#111827',
-                                        marginRight: 6,
-                                    }}
-                                >
-                                    {callType === 'video' ? 'Video' : 'Voice'} Call
-                                </Text>
-                                <View
-                                    style={{
-                                        width: 4,
-                                        height: 4,
-                                        borderRadius: 2,
-                                        backgroundColor: statusInfo.color,
-                                        marginRight: 6,
-                                    }}
+                            {/* Call Icon with gradient background */}
+                            <View
+                                style={{
+                                    width: 44,
+                                    height: 44,
+                                    borderRadius: 22,
+                                    backgroundColor: statusInfo.color + '20',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    marginRight: 14,
+                                    borderWidth: 1.5,
+                                    borderColor: statusInfo.color + '40',
+                                }}
+                            >
+                                <Feather
+                                    name={callType === 'video' ? 'video' : statusInfo.icon as any}
+                                    size={22}
+                                    color={statusInfo.color}
+                                    strokeWidth={2.5}
                                 />
-                                <Text
-                                    style={{
-                                        fontSize: 12,
-                                        fontWeight: '500',
-                                        color: statusInfo.color,
-                                    }}
-                                >
-                                    {statusInfo.text}
-                                </Text>
                             </View>
-                            {duration > 0 && (
+
+                            {/* Call Info */}
+                            <View style={{ flex: 1 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
+                                    <Text
+                                        style={{
+                                            fontSize: 15,
+                                            fontWeight: '700',
+                                            color: '#111827',
+                                            letterSpacing: 0.2,
+                                        }}
+                                    >
+                                        {callType === 'video' ? 'Video' : 'Voice'} Call
+                                    </Text>
+                                    <View
+                                        style={{
+                                            width: 5,
+                                            height: 5,
+                                            borderRadius: 2.5,
+                                            backgroundColor: statusInfo.color,
+                                            marginHorizontal: 8,
+                                        }}
+                                    />
+                                    <Text
+                                        style={{
+                                            fontSize: 13,
+                                            fontWeight: '600',
+                                            color: statusInfo.color,
+                                        }}
+                                    >
+                                        {statusInfo.text}
+                                    </Text>
+                                </View>
+                                {duration > 0 ? (
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                                        <Feather name="clock" size={12} color="#6B7280" style={{ marginRight: 4 }} />
+                                        <Text
+                                            style={{
+                                                fontSize: 13,
+                                                color: '#6B7280',
+                                                fontWeight: '500',
+                                            }}
+                                        >
+                                            {formatDuration(duration)}
+                                        </Text>
+                                    </View>
+                                ) : (
+                                    <Text
+                                        style={{
+                                            fontSize: 12,
+                                            color: '#9CA3AF',
+                                            marginTop: 2,
+                                        }}
+                                    >
+                                        No duration
+                                    </Text>
+                                )}
+                            </View>
+                        </TouchableOpacity>
+
+                        {/* Time and Read Receipt (shown when clicked) */}
+                        {isTimeVisible && (
+                            <View className='flex-row items-center'>
                                 <Text
-                                    style={{
-                                        fontSize: 12,
-                                        color: '#6B7280',
-                                        marginTop: 2,
-                                    }}
-                                >
-                                    Duration: {formatDuration(duration)}
-                                </Text>
-                            )}
-                            {isTimeVisible && (
-                                <Text
-                                    style={{
-                                        fontSize: 11,
-                                        color: '#9CA3AF',
-                                        marginTop: 4,
-                                    }}
+                                    className='text-xs text-gray-400 mt-1.5 px-2'
+                                    style={{ fontWeight: '500' }}
                                 >
                                     {new Date(message.createdAt).toLocaleTimeString('en-US', {
                                         hour: 'numeric',
@@ -185,9 +282,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                                         hour12: true
                                     })}
                                 </Text>
-                            )}
-                        </View>
-                    </TouchableOpacity>
+                                {/* Read Receipt (only for my messages) */}
+                                {isMe && message.readBy && message.readBy.length > 0 && (
+                                    <Feather
+                                        name='check-circle'
+                                        size={14}
+                                        color="#1DA1F2"
+                                        style={{ marginLeft: 4, marginTop: 1.5 }}
+                                    />
+                                )}
+                            </View>
+                        )}
+                    </View>
                 </View>
             ) : (
                 <View

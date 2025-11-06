@@ -150,9 +150,45 @@ const ConversationItemComponent: React.FC<ConversationItemProps> = ({
                 </View>
                 {lastMessage && (
                     <View className='flex-row items-center justify-between'>
-                        <Text className='text-gray-600 text-sm flex-1' numberOfLines={1}>
-                            {lastMessage.content || '📎 Attachment'}
-                        </Text>
+                        {(() => {
+                            // Check if this is a call message
+                            const isCallMessage = lastMessage.type === 'system' && (
+                                lastMessage.metadata?.callId ||
+                                (lastMessage.content && /(voice|video)\s+call\s+(completed|missed|declined|cancelled)/i.test(lastMessage.content))
+                            );
+                            
+                            if (isCallMessage) {
+                                const callType = lastMessage.metadata?.callType || 
+                                    (lastMessage.content?.toLowerCase().includes('video') ? 'video' : 'voice');
+                                const callStatus = lastMessage.metadata?.callStatus || 'completed';
+                                
+                                // Format call status text
+                                const statusText = callStatus === 'completed' ? 'ended' :
+                                    callStatus === 'missed' ? 'missed' :
+                                    callStatus === 'declined' ? 'declined' :
+                                    callStatus === 'cancelled' ? 'cancelled' : 'ended';
+                                
+                                return (
+                                    <View className='flex-row items-center flex-1'>
+                                        <Feather 
+                                            name={callType === 'video' ? 'video' : 'phone'} 
+                                            size={14} 
+                                            color="#6B7280" 
+                                            style={{ marginRight: 6 }}
+                                        />
+                                        <Text className='text-gray-600 text-sm flex-1' numberOfLines={1}>
+                                            {callType === 'video' ? 'Video' : 'Voice'} call {statusText}
+                                        </Text>
+                                    </View>
+                                );
+                            }
+                            
+                            return (
+                                <Text className='text-gray-600 text-sm flex-1' numberOfLines={1}>
+                                    {lastMessage.content || '📎 Attachment'}
+                                </Text>
+                            );
+                        })()}
                         {(clearedUnread ? 0 : (conversation.unreadCount || 0)) > 0 && (
                             <View
                                 className='ml-2 rounded-full min-w-[20px] h-5 items-center justify-center px-2'
